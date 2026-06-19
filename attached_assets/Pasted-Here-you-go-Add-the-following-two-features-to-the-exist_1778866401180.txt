@@ -1,0 +1,94 @@
+Here you go:
+
+---
+
+Add the following two features to the existing MailDay Matching app.
+
+**Feature 1 — Influencer and Affiliate Tracker**
+
+Add an Influencer Tracker to the left navigation under the Growth section. This is an Admin-only feature — VA role does not see it and it does not appear in VA navigation.
+
+**New Supabase table — Influencers:**
+
+id, first_name, last_name, instagram_handle, tiktok_handle, platform (Instagram / TikTok / Both / Other), follower_count, tier (Nano — under 10K / Micro — 10K to 100K / Mid — 100K to 500K / Macro — 500K plus), affiliate_code (unique per influencer), affiliate_link, clicks (integer — manual entry or webhook), conversions (integer — count of members who joined using this affiliate code), commission_rate (percentage), commission_owed (calculated automatically — conversions multiplied by membership price multiplied by commission rate), commission_paid (dollar amount paid to date), last_outreach_date, outreach_status (Not Contacted / Contacted / Responded / Active Partner / Declined / Ghosted), partnership_notes (long text), content_posted (array of URLs), created_date, internal_notes_timeline (same structure as Member Notes Timeline already built)
+
+**The five views inside Influencer Tracker:**
+
+All Influencers — full list of every record, filterable by platform, tier, and outreach status, sortable by follower count and conversions.
+
+Active Partners — only influencers with outreach_status = Active Partner. Shows affiliate code, affiliate link, clicks, conversions, commission owed, commission paid, last content posted URL.
+
+Top Performers — all influencers sorted by conversions descending. Shows name, platform, tier, affiliate code, conversions, commission owed.
+
+Commission Due — influencers where commission_owed is greater than zero and commission_paid is less than commission_owed. Shows name, affiliate code, conversions, commission rate, commission owed, commission paid, balance due. Total balance due displayed prominently at the top of this view.
+
+Outreach Queue — influencers with outreach_status = Not Contacted or Contacted, sorted by follower count descending. Shows name, platform, tier, follower count, last outreach date, outreach status. Each record has a Log Outreach button that opens a quick panel to update outreach status and add a dated note without leaving the queue.
+
+**Individual influencer record view:**
+
+Full record with all fields editable. Internal notes timeline at the bottom — same structure as Member Notes Timeline — showing system events and manual notes in reverse chronological order. System events created automatically for: record created, outreach status changed, conversion recorded, commission paid.
+
+Content Posted section — a list of URLs the influencer has posted about MailDay. Admin can add URLs manually. Each URL shows the date added and a clickable link.
+
+Performance summary at the top of the record — clicks, conversions, conversion rate percentage, total commission earned, total commission paid, balance owed.
+
+**On the Operations Dashboard:**
+
+Add to the existing dashboard: total active affiliate partners, total conversions from affiliate codes this month, total commission owed across all influencers. These appear in a new Growth section on the dashboard.
+
+**Affiliate code tracking:**
+
+When a new member completes checkout using an affiliate code in their URL — passed as a query parameter — the app captures the code, finds the matching influencer record, and increments conversions by one. Add an affiliate_code field to the Parent record to store which code was used at signup. This requires a webhook or URL parameter capture at the onboarding form level — build the capture logic now and note where the Shopify connection will plug in later.
+
+**Feature 2 — Pack Delivery Tracker**
+
+Add a Pack Delivery Tracker to the left navigation under the Operations section. Admin and VA can both see this view.
+
+**New Supabase table — Pack Delivery Log:**
+
+id, month_name, month_number, year, total_active_members_at_send, core_members_count, minis_members_count, homeschool_core_count, homeschool_minis_count, delivery_emails_sent, delivery_emails_failed, delivery_emails_manually_resent, confirmation_status (Pending / Sent / Partial / Confirmed), confirmed_by, confirmed_date, notes, created_date
+
+**New Supabase table — Pack Delivery Failures:**
+
+id, pack_delivery_log_id (foreign key), parent_id (foreign key), child_id (foreign key), failure_reason, resolved (boolean), resolved_date, resolved_by, resolution_notes, created_date
+
+**How the tracker works:**
+
+On the first of every month the app automatically creates a new Pack Delivery Log record for the current month. It populates month name, month number, year, and the current active member counts by tier. Status is set to Pending.
+
+When the Klaviyo pack delivery webhook fires for each member the app increments delivery_emails_sent on the current month's log record. If a webhook returns a failure the app increments delivery_emails_failed, creates a record in Pack Delivery Failures linked to the affected parent and child, and surfaces it as a pending action on the Operations Dashboard and in the Action Items queue.
+
+Admin or VA can manually mark individual failures as resolved — they select the failure record, click Mark Resolved, enter resolution notes, and the resolved field sets to true. When all failures for a month are resolved the month's status updates automatically from Partial to Confirmed.
+
+Admin can manually update the confirmation status at any time and add notes — for example if pack delivery happened outside the normal Klaviyo flow.
+
+**The Pack Delivery Tracker view:**
+
+Current month row displayed prominently at the top with full status — total members, sent count, failed count, resolved count, current status, days since send.
+
+All previous months below in reverse chronological order — most recent first.
+
+Each row is expandable — clicking it shows the full breakdown by tier and a list of any failure records for that month with their resolution status.
+
+Filter by year. Filter by status. Export full log as CSV. Export failures only as CSV.
+
+Failure detail panel — clicking any failure record opens a side panel showing the parent name, child name, tier, failure reason, resolution status, and full resolution notes. Mark Resolved button available directly in the panel.
+
+At the top of the Pack Delivery Tracker show a summary header: total months tracked, total emails sent to date, total failures to date, overall delivery success rate as a percentage.
+
+**On the Operations Dashboard:**
+
+Current month pack delivery status card already exists — update it to link directly to the current month's row in the Pack Delivery Tracker. Add failure count to the card if any failures exist for the current month.
+
+**Build order:**
+1. Supabase schema — Influencers table, Pack Delivery Log table, Pack Delivery Failures table, affiliate_code field on Parents table — show me all schema changes and ask me to confirm before writing any frontend
+2. Influencer Tracker — all five views plus individual record view
+3. Operations Dashboard Growth section update
+4. Affiliate code capture logic
+5. Pack Delivery Tracker view
+6. Pack delivery auto-creation logic on first of month
+7. Failure tracking and resolution flow
+8. Operations Dashboard pack delivery card update
+9. Action Items and pending actions integration for both features
+
+Show me the schema changes first before writing any frontend code.

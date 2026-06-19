@@ -1,0 +1,89 @@
+Perfect. Here's the prompt — paste it as a follow-up in Replit:
+
+---
+
+Add the following automated communication and reporting features to the existing MailDay Matching app.
+
+**Feature 1 — Daily Digest Slack Message**
+
+Every morning at 7am send an automated message to a designated MailDay Slack channel. Use the Slack Incoming Webhooks API to send the message. I will provide the Slack webhook URL as an environment variable called SLACK_WEBHOOK_URL.
+
+The message should be formatted cleanly using Slack Block Kit and include the following sections:
+
+Good morning header with today's date.
+
+Urgent Attention — only shows if any of these exist: children at 21-day guarantee breach with billing paused, Give a Key applications older than 48 hours with no action taken, approved Give a Key applications with Tremendous not yet sent, receipts submitted but not yet verified. If nothing is urgent this section shows: No urgent items today. You're good.
+
+Matching Status: Total unmatched in Core pool, total unmatched in Minis pool, total in Rematch Queue, days until next Friday matching session.
+
+Give a Key: Pending applications count, waitlisted count, current fund balance.
+
+Member Health: Total active members, new members in last 7 days, at-risk members count, cancellations in last 7 days.
+
+A closing line that links directly to the app dashboard.
+
+If every section is green — no urgent items, no guarantee breaches, no overdue tasks — the message opens with a green checkmark and says: All clear. Here's your morning snapshot.
+
+Schedule this to fire at 7am in the America/Denver timezone every day including weekends.
+
+**Feature 2 — Friday Matching Reminder Slack Message**
+
+Every Friday at 8am send a separate Slack message to the same channel specifically for the matching session. This fires in addition to the daily digest, not instead of it.
+
+The message includes: A header — It's Friday. Time to match. Core pool size — number of children waiting. Minis pool size — number of children waiting. Rematch Queue size. Any children hitting guarantee warnings today. A direct link to open Friday Matching Mode in the app.
+
+Format this message to feel action-oriented and clear — this is a prompt to do a specific task, not a summary.
+
+**Feature 3 — Weekly Operations Summary Slack Message**
+
+Every Sunday at 8am send a weekly operations summary to the same Slack channel covering the previous Monday through Sunday.
+
+The summary includes:
+
+Membership: New members this week by tier, cancellations this week, net member change, current total active members.
+
+Matching: Matches made this week, children still unmatched at end of week, rematches completed, any guarantee breaches that occurred.
+
+Give a Key: Applications received, approved, waitlisted, rejected, activated. Fund balance start of week versus end of week. Donations received this week.
+
+Member Health: At-risk members flagged this week, quiet matches flagged, billing issues flagged.
+
+A week-over-week comparison line for MRR — up, down, or flat with the dollar difference.
+
+End with a footer: Have a good Sunday. The week starts fresh tomorrow.
+
+**Feature 4 — Mobile-Optimized View**
+
+Make the following views fully functional and readable on mobile screens — minimum 375px viewport width:
+
+Operations Dashboard — all cards stack vertically on mobile, Today's Work cards remain prominent at the top, numbers remain large and readable, Run Matching Session button remains easily tappable.
+
+Action Items — full functionality on mobile, each action item tappable, Mark Done button accessible without zooming.
+
+Children record view — all fields readable, Member Notes Timeline scrollable, quick-add note button accessible.
+
+Parents record view — same as Children.
+
+Give a Key Applications Queue — application cards stack cleanly, Approve, Waitlist, and Reject buttons large enough to tap accurately on mobile.
+
+Global search — fully functional on mobile, results dropdown scrollable.
+
+Navigation — collapse the sidebar into a hamburger menu on mobile. Tapping the hamburger opens a full-screen nav overlay. Dashboard and Action Items remain accessible from the top bar on mobile at all times without opening the nav.
+
+Do not redesign the desktop experience — mobile optimization only. The desktop layout stays exactly as it is. Use responsive CSS breakpoints to handle the switch. Test at 375px, 390px, and 428px widths — these cover iPhone SE, iPhone 14, and iPhone 14 Pro Max.
+
+**Feature 5 — Slack Setup Instructions**
+
+After building all of the above, output clear step-by-step instructions for how to: create a Slack Incoming Webhook for the MailDay workspace, add the webhook URL as the SLACK_WEBHOOK_URL environment variable in Replit, and test that the daily digest fires correctly. Make the instructions simple enough for a non-technical user to follow.
+
+**Build order:**
+1. Slack daily digest — Feature 1
+2. Friday matching reminder — Feature 2
+3. Weekly operations summary — Feature 3
+4. Mobile optimization — Feature 4
+
+Before building Feature 1 output the Slack message format as a preview using sample data and ask me to confirm it looks right before wiring up the scheduler and webhook.
+
+---
+
+That's the full prompt. Once Replit builds it and gives you the Slack setup instructions, come back here and I'll walk you through connecting it to your MailDay workspace step by step.

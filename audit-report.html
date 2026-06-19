@@ -1,0 +1,1131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>MailDay Matching — Audit Report</title>
+<style>
+  /* ---------- Page setup ---------- */
+  @page {
+    size: A4;
+    margin: 18mm 16mm 22mm 16mm;
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      font-size: 9pt;
+      color: #999;
+    }
+    @bottom-left {
+      content: "MailDay Matching — Audit Report — May 2026";
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      font-size: 9pt;
+      color: #999;
+    }
+  }
+  @page :first {
+    margin: 0;
+    @bottom-right { content: none; }
+    @bottom-left  { content: none; }
+  }
+
+  /* ---------- Base ---------- */
+  * { box-sizing: border-box; }
+  html, body {
+    font-family: 'Helvetica Neue', 'Segoe UI', Arial, sans-serif;
+    color: #1a1a1a;
+    font-size: 10.5pt;
+    line-height: 1.55;
+    margin: 0;
+    padding: 0;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  h1, h2, h3, h4 {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    color: #1a1a1a;
+    line-height: 1.25;
+    margin: 0 0 8pt 0;
+  }
+  h1 { font-size: 26pt; font-weight: 700; }
+  h2 { font-size: 18pt; font-weight: 700; margin-top: 20pt; border-bottom: 2px solid #DD4B39; padding-bottom: 4pt; }
+  h3 { font-size: 13pt; font-weight: 700; margin-top: 14pt; color: #2a2a2a; }
+  h4 { font-size: 11pt; font-weight: 700; margin-top: 10pt; color: #555; text-transform: uppercase; letter-spacing: 0.5px; }
+  p  { margin: 0 0 8pt 0; }
+  ul, ol { margin: 0 0 10pt 22pt; padding: 0; }
+  li { margin-bottom: 4pt; }
+  a  { color: #DD4B39; text-decoration: none; }
+  strong { color: #000; }
+  code {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 9.5pt;
+    background: #f4f4f4;
+    padding: 1px 4px;
+    border-radius: 3px;
+    color: #b34234;
+  }
+
+  /* ---------- Cover ---------- */
+  .cover {
+    page-break-after: always;
+    background: linear-gradient(160deg, #DD4B39 0%, #b3392b 100%);
+    color: #fff;
+    height: 297mm;
+    padding: 40mm 28mm;
+    position: relative;
+  }
+  .cover .logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255,255,255,0.16);
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-family: 'Georgia', serif;
+    font-weight: 700;
+    font-size: 16pt;
+  }
+  .cover .logo .icon {
+    background: #fff;
+    color: #DD4B39;
+    width: 32px; height: 32px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 18pt;
+  }
+  .cover .label {
+    margin-top: 80mm;
+    text-transform: uppercase;
+    letter-spacing: 4px;
+    font-size: 10pt;
+    opacity: 0.85;
+  }
+  .cover h1 {
+    color: #fff;
+    font-size: 48pt;
+    line-height: 1.05;
+    margin: 8pt 0 18pt 0;
+    font-weight: 700;
+  }
+  .cover .subtitle {
+    font-size: 16pt;
+    font-weight: 300;
+    max-width: 130mm;
+    opacity: 0.95;
+  }
+  .cover .meta {
+    position: absolute;
+    bottom: 30mm;
+    left: 28mm;
+    right: 28mm;
+    display: flex;
+    justify-content: space-between;
+    font-size: 10pt;
+    opacity: 0.95;
+  }
+  .cover .meta div .k {
+    display: block;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-size: 8pt;
+    opacity: 0.7;
+    margin-bottom: 3px;
+  }
+  .cover .meta div .v {
+    font-weight: 600;
+    font-size: 11pt;
+  }
+
+  /* ---------- Section page break helpers ---------- */
+  .section { page-break-before: always; }
+  .keep    { page-break-inside: avoid; }
+
+  /* ---------- Hero box / callouts ---------- */
+  .hero {
+    background: #fff8f6;
+    border-left: 4px solid #DD4B39;
+    padding: 14pt 16pt;
+    margin: 12pt 0;
+    border-radius: 0 6px 6px 0;
+  }
+  .callout {
+    border-radius: 6px;
+    padding: 12pt 14pt;
+    margin: 10pt 0;
+    page-break-inside: avoid;
+  }
+  .callout.green  { background: #ecfdf3; border-left: 4px solid #16a34a; }
+  .callout.amber  { background: #fffaeb; border-left: 4px solid #f59e0b; }
+  .callout.red    { background: #fef2f2; border-left: 4px solid #dc2626; }
+  .callout.blue   { background: #eff6ff; border-left: 4px solid #2563eb; }
+  .callout strong.tag {
+    display: inline-block;
+    background: #fff;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 9pt;
+    margin-bottom: 4pt;
+  }
+  .callout.green strong.tag  { color: #15803d; border: 1px solid #bbf7d0; }
+  .callout.amber strong.tag  { color: #b45309; border: 1px solid #fde68a; }
+  .callout.red strong.tag    { color: #b91c1c; border: 1px solid #fecaca; }
+  .callout.blue strong.tag   { color: #1d4ed8; border: 1px solid #bfdbfe; }
+
+  /* ---------- Severity badges ---------- */
+  .badge {
+    display: inline-block;
+    font-size: 8.5pt;
+    font-weight: 700;
+    padding: 2px 9px;
+    border-radius: 999px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    vertical-align: middle;
+    margin-right: 4pt;
+  }
+  .sev-crit { background: #dc2626; color: #fff; }
+  .sev-high { background: #ea580c; color: #fff; }
+  .sev-med  { background: #f59e0b; color: #fff; }
+  .sev-low  { background: #64748b; color: #fff; }
+  .effort {
+    display: inline-block;
+    font-size: 8.5pt;
+    font-weight: 700;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid #ddd;
+    color: #555;
+    vertical-align: middle;
+  }
+
+  /* ---------- Issue card ---------- */
+  .issue {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 14pt 16pt;
+    margin: 14pt 0;
+    page-break-inside: avoid;
+    background: #fff;
+  }
+  .issue .header {
+    display: flex;
+    align-items: baseline;
+    gap: 8pt;
+    margin-bottom: 6pt;
+  }
+  .issue .header h3 {
+    margin: 0;
+    flex: 1;
+    font-size: 13pt;
+  }
+  .issue dl {
+    margin: 8pt 0 0 0;
+    display: grid;
+    grid-template-columns: 110px 1fr;
+    row-gap: 6pt;
+    column-gap: 12pt;
+  }
+  .issue dt {
+    font-weight: 700;
+    font-size: 9.5pt;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .issue dd {
+    margin: 0;
+    font-size: 10.5pt;
+    line-height: 1.5;
+  }
+  .issue dd.analogy {
+    font-style: italic;
+    color: #555;
+    border-left: 2px solid #e5e7eb;
+    padding-left: 10pt;
+  }
+  .issue .tech-note {
+    margin-top: 10pt;
+    background: #f8fafc;
+    border: 1px dashed #cbd5e1;
+    border-radius: 6px;
+    padding: 8pt 10pt;
+    font-size: 9pt;
+    color: #475569;
+  }
+  .issue .tech-note strong { color: #1e293b; }
+
+  /* ---------- Tables ---------- */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10pt 0;
+    font-size: 10pt;
+    page-break-inside: avoid;
+  }
+  th, td {
+    text-align: left;
+    padding: 8pt 10pt;
+    border-bottom: 1px solid #e5e7eb;
+    vertical-align: top;
+  }
+  th {
+    background: #f8fafc;
+    font-weight: 700;
+    font-size: 9.5pt;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: #475569;
+    border-bottom: 2px solid #cbd5e1;
+  }
+  tr:nth-child(even) td { background: #fcfcfd; }
+
+  /* ---------- TOC ---------- */
+  .toc ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .toc li {
+    border-bottom: 1px dashed #e5e7eb;
+    padding: 6pt 0;
+    font-size: 11pt;
+    display: flex;
+    justify-content: space-between;
+  }
+  .toc li .n { color: #888; font-variant: tabular-nums; }
+  .toc li.h2 { font-weight: 700; }
+  .toc li.h3 { padding-left: 16pt; font-weight: 400; color: #444; }
+
+  /* ---------- Summary stat row ---------- */
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8pt;
+    margin: 14pt 0;
+  }
+  .stat {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 12pt;
+    text-align: center;
+    page-break-inside: avoid;
+  }
+  .stat .num { font-size: 28pt; font-weight: 700; line-height: 1; color: #1a1a1a; }
+  .stat .lbl { font-size: 9pt; color: #666; text-transform: uppercase; letter-spacing: 0.6px; margin-top: 4pt; }
+  .stat.crit .num { color: #dc2626; }
+  .stat.high .num { color: #ea580c; }
+  .stat.med  .num { color: #f59e0b; }
+  .stat.low  .num { color: #64748b; }
+
+</style>
+</head>
+<body>
+
+<!-- ============================== COVER ============================== -->
+<section class="cover">
+  <div class="logo"><span class="icon">✉</span>MailDay Matching</div>
+
+  <div class="label">Confidential</div>
+  <h1>Security &amp; Quality<br/>Audit Report</h1>
+  <div class="subtitle">A plain-English review of the MailDay admin platform, the risks we found, and what to fix first.</div>
+
+  <div class="meta">
+    <div>
+      <span class="k">Prepared for</span>
+      <span class="v">MailDay Leadership</span>
+    </div>
+    <div>
+      <span class="k">Date</span>
+      <span class="v">May 19, 2026</span>
+    </div>
+    <div>
+      <span class="k">Version</span>
+      <span class="v">1.0</span>
+    </div>
+  </div>
+</section>
+
+
+<!-- ============================== TOC ============================== -->
+<section class="section toc">
+  <h2>Table of Contents</h2>
+  <ol>
+    <li class="h2"><span>1. Executive Summary</span><span class="n">3</span></li>
+    <li class="h2"><span>2. What's Working Well</span><span class="n">5</span></li>
+    <li class="h2"><span>3. Critical Issues — Fix This Week</span><span class="n">6</span></li>
+    <li class="h3"><span>3.1 Login key stored where any guest script can grab it</span><span class="n">6</span></li>
+    <li class="h3"><span>3.2 Outside delivery doors will open without checking ID</span><span class="n">7</span></li>
+    <li class="h3"><span>3.3 Anyone can change a customer's shipping address</span><span class="n">8</span></li>
+    <li class="h3"><span>3.4 Receipt upload accepts any file from anyone</span><span class="n">9</span></li>
+    <li class="h3"><span>3.5 Influencer commissions can be inflated by anyone</span><span class="n">10</span></li>
+    <li class="h2"><span>4. Important Issues — Fix This Month</span><span class="n">11</span></li>
+    <li class="h2"><span>5. Useful Improvements — Next Quarter</span><span class="n">15</span></li>
+    <li class="h2"><span>6. The "At Risk" Display Bug</span><span class="n">16</span></li>
+    <li class="h2"><span>7. Recommended Roadmap</span><span class="n">17</span></li>
+    <li class="h2"><span>8. Glossary of Terms</span><span class="n">19</span></li>
+  </ol>
+</section>
+
+
+<!-- ============================== 1. EXECUTIVE SUMMARY ============================== -->
+<section class="section">
+  <h2>1. Executive Summary</h2>
+
+  <p>
+    MailDay Matching is the internal admin web app your team uses every day to manage pen-pal
+    matching, members, donations, influencer partnerships, and monthly pack delivery. It connects
+    to Shopify, ReCharge, Klaviyo, Slack, and Anthropic (the AI that suggests matches), and stores
+    all of its information in a database called Supabase.
+  </p>
+
+  <div class="hero">
+    <strong>Bottom line:</strong> the app is well-built and the team has clearly invested in
+    structure and clarity. It is also a one-person admin tool that has quietly grown into a
+    system holding real customer and children's information — and several of the doors and
+    locks have not kept pace with that growth. None of the issues below are catastrophic on
+    their own, but a few of them should be fixed within the next week, and a few more before
+    the business doubles in size.
+  </div>
+
+  <h3>How serious is what we found?</h3>
+
+  <div class="stat-row">
+    <div class="stat crit"><div class="num">5</div><div class="lbl">Critical</div></div>
+    <div class="stat high"><div class="num">7</div><div class="lbl">Important</div></div>
+    <div class="stat med"><div class="num">9</div><div class="lbl">Improvements</div></div>
+    <div class="stat low"><div class="num">8</div><div class="lbl">Nice-to-haves</div></div>
+  </div>
+
+  <h3>What does each level mean?</h3>
+  <ul>
+    <li><span class="badge sev-crit">Critical</span>
+      A real attacker (or a curious customer) could realistically cause damage today.
+      <strong>Fix this week.</strong></li>
+    <li><span class="badge sev-high">Important</span>
+      A weakness that is unlikely to be exploited tomorrow, but will hurt as you grow.
+      <strong>Fix this month.</strong></li>
+    <li><span class="badge sev-med">Improvement</span>
+      A clear best-practice gap. Not urgent; bake into the next sprint or two.</li>
+    <li><span class="badge sev-low">Nice-to-have</span>
+      Polish, future-proofing, or convenience. Plan for the next quarter.</li>
+  </ul>
+
+  <h3>The three things we recommend fixing first</h3>
+
+  <div class="callout red">
+    <strong class="tag">DO THIS WEEK · #1</strong>
+    <strong>Make webhook secrets mandatory.</strong>
+    Right now, if the "secret password" for our Shopify, ReCharge, or Klaviyo connections is
+    not configured, the server still accepts incoming messages and acts on them. That is the
+    online equivalent of a delivery door that opens regardless of whether the courier shows
+    ID. A bored attacker who guesses the URL can create fake parent accounts, log fake
+    donations, or end real matches. (See section 3.2)
+  </div>
+
+  <div class="callout red">
+    <strong class="tag">DO THIS WEEK · #2</strong>
+    <strong>Stop trusting the email field on public forms.</strong>
+    Three public pages — Enroll, Give-a-Key PO-Box, and the affiliate tracker — accept an
+    email address and then change records associated with that email, with no proof the
+    person sending the form actually owns it. The most direct consequence: anyone who knows
+    a customer's email can change their mailing address. (See sections 3.3 and 3.5)
+  </div>
+
+  <div class="callout red">
+    <strong class="tag">DO THIS WEEK · #3</strong>
+    <strong>Stop storing the admin login key in a place every script on the page can read.</strong>
+    The token that proves you are logged in is stored in the browser's "localStorage", which
+    any piece of JavaScript that runs on the page can read. If a third-party widget were ever
+    added — or a single cross-site scripting bug crept in — a 30-day admin login could be
+    stolen silently. (See section 3.1)
+  </div>
+
+  <h3>What we did NOT find</h3>
+  <ul>
+    <li>No evidence the database has been tampered with.</li>
+    <li>No SQL injection vulnerabilities in the code we reviewed.</li>
+    <li>No passwords stored in plain text (they are properly hashed).</li>
+    <li>No obvious exposed API keys in the public-facing frontend code.</li>
+  </ul>
+</section>
+
+
+<!-- ============================== 2. WHAT'S WORKING ============================== -->
+<section class="section">
+  <h2>2. What's Working Well</h2>
+
+  <p>Before the gaps, the wins. A lot of the foundation is correct, and that matters because most of
+  the fixes below are small additions on top of a solid base — not rewrites.</p>
+
+  <div class="callout green">
+    <strong class="tag">✓ DONE RIGHT</strong>
+    <strong>Passwords are stored securely.</strong>
+    Even if someone walked out of the office with the entire database, they would not see
+    anyone's actual password — only a one-way scramble of it (called a "bcrypt hash").
+    This is the industry standard and the code uses it correctly.
+  </div>
+
+  <div class="callout green">
+    <strong class="tag">✓ DONE RIGHT</strong>
+    <strong>Two roles are clearly separated.</strong>
+    There are two kinds of users: <strong>Admin</strong> and <strong>VA</strong> (virtual
+    assistant). The code consistently hides sensitive fields like mailing addresses,
+    internal notes, and safety flags from the VA role. That layered approach is exactly
+    what you want.
+  </div>
+
+  <div class="callout green">
+    <strong class="tag">✓ DONE RIGHT</strong>
+    <strong>The code is well organised.</strong>
+    Every feature lives in its own file, the database queries are parameterised (which
+    blocks a whole class of attacks called "SQL injection"), and the project uses
+    industry-standard tools (TypeScript, React, Express, Supabase, Tailwind). A new
+    developer joining the team would be productive within a week.
+  </div>
+
+  <div class="callout green">
+    <strong class="tag">✓ DONE RIGHT</strong>
+    <strong>Incoming webhook signatures CAN be checked.</strong>
+    The code knows how to verify that a message from Shopify is really from Shopify
+    (and same for ReCharge and Klaviyo). The mechanism exists — the only problem is
+    that it can be disabled by forgetting to set one environment variable. See
+    section 3.2 for how to make it mandatory.
+  </div>
+
+  <div class="callout green">
+    <strong class="tag">✓ DONE RIGHT</strong>
+    <strong>Logs do not show sensitive data.</strong>
+    The logging tool (pino) is configured to hide login keys and session cookies from
+    log files. If logs are ever shared with a vendor for debugging, they will not contain
+    those secrets.
+  </div>
+
+  <div class="callout green">
+    <strong class="tag">✓ DONE RIGHT</strong>
+    <strong>The user interface is consistent and accessible.</strong>
+    The team picked a high-quality component library (shadcn/Radix) so things like
+    dialogs, dropdowns, and keyboard navigation work the way users expect. The mobile
+    layout works. Icons have labels for screen readers.
+  </div>
+</section>
+
+
+<!-- ============================== 3. CRITICAL ============================== -->
+<section class="section">
+  <h2>3. Critical Issues — Fix This Week</h2>
+
+  <p>These are issues where a motivated person could cause real damage today, with skills that are
+  freely taught online. We strongly recommend addressing all five within the next week.</p>
+
+  <!-- 3.1 -->
+  <div class="issue">
+    <div class="header">
+      <span class="badge sev-crit">Critical</span>
+      <h3>3.1 Login key stored where any guest script can grab it</h3>
+      <span class="effort">Effort: Medium</span>
+    </div>
+    <dl>
+      <dt>What it is</dt>
+      <dd>When you sign in, the app puts your 30-day login key into a part of the browser called
+        <em>localStorage</em>. Anything else loaded on the page — a tracking script, an
+        ad-blocker extension, a future copy-paste of code from a tutorial — can read it.</dd>
+
+      <dt>Analogy</dt>
+      <dd class="analogy">Imagine the office key is left in the top drawer of every reception
+        desk in every coffee shop you visit, "just in case you forget yours". You probably will
+        never have a problem. But the day someone you don't know sits at that desk, your office
+        is open to them for the next 30 days.</dd>
+
+      <dt>What an attacker could do</dt>
+      <dd>Steal your login key once and use it for a month. They would not need your password.
+        They could read every parent, child, and donation record, and approve or reject
+        Give-a-Key applications.</dd>
+
+      <dt>What to fix</dt>
+      <dd>Move the login key into an <strong>HttpOnly cookie</strong> (a special kind of cookie
+        that browser scripts cannot read), and turn on a security feature called <strong>Content
+        Security Policy (CSP)</strong> that the code currently has switched off.</dd>
+
+      <dt>Effort</dt>
+      <dd>Roughly 1–2 developer days. The login flow has to be moved from "send me a token"
+        to "set me a cookie", and the CSP rules need to be tuned for the third-party fonts
+        the app uses.</dd>
+    </dl>
+    <div class="tech-note">
+      <strong>For the dev team:</strong> auth context lives in
+      <code>artifacts/mailday/src/lib/auth.tsx</code>; CSP is disabled in
+      <code>artifacts/api-server/src/app.ts</code>. Add cookie-based auth, set
+      <code>SameSite=Lax; Secure; HttpOnly</code>, and re-enable helmet's CSP with a
+      whitelist for Google Fonts.
+    </div>
+  </div>
+
+  <!-- 3.2 -->
+  <div class="issue">
+    <div class="header">
+      <span class="badge sev-crit">Critical</span>
+      <h3>3.2 Outside delivery doors will open without checking ID</h3>
+      <span class="effort">Effort: Small</span>
+    </div>
+    <dl>
+      <dt>What it is</dt>
+      <dd>When Shopify, ReCharge, or Klaviyo send us a message (called a "webhook"), the code
+        is supposed to check a secret password that proves the message is genuine. If that
+        secret is not configured, the code currently logs a warning and <em>accepts the
+        message anyway</em>.</dd>
+
+      <dt>Analogy</dt>
+      <dd class="analogy">It's a back door at the warehouse with a card reader. If the card
+        reader is unplugged, the door is supposed to stay locked. Right now it stays open.</dd>
+
+      <dt>What an attacker could do</dt>
+      <dd>If even one of the three secrets is missing, anyone on the internet who guesses the
+        webhook URL can: create fake parent accounts, log fake donations to the Give-a-Key
+        fund, mark real subscriptions as cancelled (which ends matches and triggers rematch
+        emails), or fake "I opened your email" events to skew metrics.</dd>
+
+      <dt>What to fix</dt>
+      <dd>Make the secret <em>required</em> — if it is missing, the webhook endpoint should
+        refuse all messages with a 503 error and the operator should be paged. The change is
+        a one-line condition in three files.</dd>
+
+      <dt>Effort</dt>
+      <dd>Half a day, including checking the three production secrets are set.</dd>
+    </dl>
+    <div class="tech-note">
+      <strong>For the dev team:</strong> see
+      <code>artifacts/api-server/src/routes/webhooks.ts</code> lines 47–55 (Shopify),
+      148–156 (ReCharge), and 393–401 (Klaviyo). The pattern <code>if (secret) { …verify… }
+      else { warn }</code> should become <code>if (!secret) return 503; …verify…</code>.
+    </div>
+  </div>
+
+  <!-- 3.3 -->
+  <div class="issue">
+    <div class="header">
+      <span class="badge sev-crit">Critical</span>
+      <h3>3.3 Anyone can change a customer's shipping address</h3>
+      <span class="effort">Effort: Medium</span>
+    </div>
+    <dl>
+      <dt>What it is</dt>
+      <dd>The public "Enroll my children" form (<code>/enroll</code>) and the Give-a-Key PO-Box
+        form ask for an email address, look up the matching customer in the database, and then
+        <em>overwrite</em> that customer's mailing address with whatever was typed into the form.
+        There is no proof the person filling out the form is the actual customer.</dd>
+
+      <dt>Analogy</dt>
+      <dd class="analogy">It's like the front desk of an apartment building updating your
+        forwarding address because someone in line said "I'm Jane, and Jane's new address is
+        '123 Other Street'." No ID is checked.</dd>
+
+      <dt>What an attacker could do</dt>
+      <dd>Knowing only a customer's email (often guessable or scraped from social media), an
+        attacker could redirect that customer's monthly pen-pal letters — and any other mail —
+        to an address of their choosing. For a children's product, this is a particularly
+        serious safety concern.</dd>
+
+      <dt>What to fix</dt>
+      <dd>Send the customer a one-time confirmation link by email and only apply the address
+        change after they click it. The same mechanism the password-reset flow already uses
+        can be re-used.</dd>
+
+      <dt>Effort</dt>
+      <dd>1–2 developer days. The email-sending infrastructure already exists
+        (Resend is wired up for password reset).</dd>
+    </dl>
+    <div class="tech-note">
+      <strong>For the dev team:</strong>
+      <code>artifacts/api-server/src/routes/enroll.ts</code> and
+      <code>artifacts/api-server/src/routes/give-a-key.ts</code> (the
+      <code>/give-a-key/po-box</code> handler). Re-use the
+      <code>reset_token</code> pattern from <code>auth.ts</code>.
+    </div>
+  </div>
+
+  <!-- 3.4 -->
+  <div class="issue">
+    <div class="header">
+      <span class="badge sev-crit">Critical</span>
+      <h3>3.4 Receipt upload accepts any file from anyone</h3>
+      <span class="effort">Effort: Small</span>
+    </div>
+    <dl>
+      <dt>What it is</dt>
+      <dd>When a Give-a-Key recipient uploads a photo of their PO-Box receipt, the server:
+        (a) accepts any file type by trusting the filename's extension; (b) does not check
+        the file size; (c) overwrites any earlier file with the same name; and (d) saves it
+        to a <em>publicly readable</em> folder, meaning the resulting URL works for anyone
+        on the internet who guesses it.</dd>
+
+      <dt>Analogy</dt>
+      <dd class="analogy">It's a donation drop-box on a public street that accepts anything
+        you put in it, no size limit, and the contents can be viewed by anyone walking by.</dd>
+
+      <dt>What an attacker could do</dt>
+      <dd>Upload very large files to run up your Supabase storage bill; upload disguised
+        malware files to a URL that looks like it belongs to MailDay; or simply view other
+        families' receipts (which may include names, addresses, and partial payment info).</dd>
+
+      <dt>What to fix</dt>
+      <dd>Three small changes: (1) check the file's real type by reading its first few bytes,
+        not just the filename; (2) reject anything over (say) 5 MB; (3) put the receipts in a
+        <em>private</em> Supabase bucket and generate short-lived links when an admin needs
+        to view one.</dd>
+
+      <dt>Effort</dt>
+      <dd>1 developer day plus a short Supabase storage settings change.</dd>
+    </dl>
+    <div class="tech-note">
+      <strong>For the dev team:</strong>
+      <code>artifacts/api-server/src/routes/give-a-key.ts</code> lines 166–187. Use a
+      magic-byte sniffer (e.g. <code>file-type</code> npm package), cap
+      <code>fileBuffer.length</code>, set the bucket to private, and replace
+      <code>getPublicUrl</code> with <code>createSignedUrl</code> (60-min expiry).
+    </div>
+  </div>
+
+  <!-- 3.5 -->
+  <div class="issue">
+    <div class="header">
+      <span class="badge sev-crit">Critical</span>
+      <h3>3.5 Influencer commissions can be inflated by anyone</h3>
+      <span class="effort">Effort: Small</span>
+    </div>
+    <dl>
+      <dt>What it is</dt>
+      <dd>There is a public URL that increments an influencer's "conversion" count and the
+        commission they are owed. It accepts any affiliate code from any caller, and it also
+        accepts a "parent ID" that tags a real customer to that influencer — again, with no
+        proof.</dd>
+
+      <dt>Analogy</dt>
+      <dd class="analogy">A tip jar that anyone can drop slips into, each slip reading
+        "credit this barista $14 for serving me", with no check that the customer was ever
+        served — and the slips are tallied automatically against payroll.</dd>
+
+      <dt>What an attacker could do</dt>
+      <dd>Inflate a friendly influencer's payout, sabotage a competitor's commission
+        records, or attach real customers to the wrong influencer to skew growth metrics.</dd>
+
+      <dt>What to fix</dt>
+      <dd>Only the Shopify checkout (which we trust) should be allowed to record a conversion.
+        Require an HMAC signature on this endpoint or move the conversion-recording logic
+        entirely into the Shopify-orders webhook.</dd>
+
+      <dt>Effort</dt>
+      <dd>Half a day.</dd>
+    </dl>
+    <div class="tech-note">
+      <strong>For the dev team:</strong>
+      <code>artifacts/api-server/src/routes/influencers.ts</code> lines 250–271. Either
+      add HMAC verification (shared secret with the calling Shopify script), or move the
+      <code>conversions++</code> logic into <code>webhooks.ts</code>'s Shopify-order handler
+      using the existing <code>X-Shopify-Hmac-Sha256</code> check, and delete the public route.
+    </div>
+  </div>
+</section>
+
+
+<!-- ============================== 4. IMPORTANT ============================== -->
+<section class="section">
+  <h2>4. Important Issues — Fix This Month</h2>
+
+  <p>These do not need to be fixed this week, but each is a real exposure that will start to bite as
+  the business grows or as more people are given accounts.</p>
+
+  <!-- 4.1 -->
+  <div class="issue">
+    <div class="header">
+      <span class="badge sev-high">Important</span>
+      <h3>4.1 Login key lasts 30 days and cannot be cancelled</h3>
+      <span class="effort">Effort: Medium</span>
+    </div>
+    <dl>
+      <dt>Plain English</dt>
+      <dd>Once you sign in, the key is valid for 30 days, and there is no "log everyone out"
+        button. The current "Log out" button just deletes your local copy — it doesn't tell
+        the server to invalidate the key. If you lose a laptop, that laptop can still log in
+        for up to 30 days.</dd>
+      <dt>Fix</dt>
+      <dd>Shorter access keys (15 minutes), longer refresh keys (1–7 days), and a server-side
+        "revoked tokens" list. Or move to a session library that already does this.</dd>
+      <dt>Effort</dt>
+      <dd>2–3 days.</dd>
+    </dl>
+  </div>
+
+  <!-- 4.2 -->
+  <div class="issue">
+    <div class="header">
+      <span class="badge sev-high">Important</span>
+      <h3>4.2 Rate limiting only on the login screen</h3>
+      <span class="effort">Effort: Small</span>
+    </div>
+    <dl>
+      <dt>Plain English</dt>
+      <dd>You can only try to log in 20 times in 15 minutes per network address, which is
+        good. But the "Forgot password" and "Change password" forms have no such limit, and
+        the public forms (enroll, GAK apply, GAK PO-box) can be submitted as fast as someone
+        can type. Anyone could send 10,000 password-reset requests in a minute to flood your
+        email service.</dd>
+      <dt>Fix</dt>
+      <dd>Apply the same rate limit to all sensitive endpoints, plus add a small per-email
+        cooldown (e.g., "you can only request a password reset once every 60 seconds for the
+        same email").</dd>
+      <dt>Effort</dt>
+      <dd>Half a day.</dd>
+    </dl>
+  </div>
+
+  <!-- 4.3 -->
+  <div class="issue">
+    <div class="header">
+      <span class="badge sev-high">Important</span>
+      <h3>4.3 Test endpoints and seed data live in production</h3>
+      <span class="effort">Effort: Small</span>
+    </div>
+    <dl>
+      <dt>Plain English</dt>
+      <dd>An admin user can press a button that creates five fake Give-a-Key applications and
+        four fake donations. That button exists in the live system. It is unlikely an admin
+        would press it by accident, but it is the kind of thing that should not be available
+        outside a test environment.</dd>
+      <dt>Fix</dt>
+      <dd>Wrap the seed endpoint in an <code>if (NODE_ENV !== 'production')</code> check, or
+        delete it.</dd>
+      <dt>Effort</dt>
+      <dd>1 hour.</dd>
+    </dl>
+  </div>
+
+  <!-- 4.4 -->
+  <div class="issue">
+    <div class="header">
+      <span class="badge sev-high">Important</span>
+      <h3>4.4 Children's first names &amp; interests are sent to an AI on every match</h3>
+      <span class="effort">Effort: Medium</span>
+    </div>
+    <dl>
+      <dt>Plain English</dt>
+      <dd>When the "Run Matching" button is pressed, the names, ages, interests, and home
+        states of every unmatched child are sent to a third-party AI (Anthropic Claude) to
+        suggest pairings. This is documented and works well, but the data leaving your
+        building is not redacted — it leaves with real first names attached.</dd>
+      <dt>Why it matters</dt>
+      <dd>For a children's product, the bar for data sharing is higher (COPPA, state child
+        privacy laws). At minimum the families should know this happens; ideally the data
+        sent to the AI is anonymised first.</dd>
+      <dt>Fix</dt>
+      <dd>Replace first names with internal codes ("Child A", "Child B", …) before sending
+        to the AI, and translate back on the way home. Also confirm Anthropic's data
+        retention setting is set to "do not train on submitted data".</dd>
+      <dt>Effort</dt>
+      <dd>1 day plus a privacy-policy review.</dd>
+    </dl>
+  </div>
+
+  <!-- 4.5 -->
+  <div class="issue">
+    <div class="header">
+      <span class="badge sev-high">Important</span>
+      <h3>4.5 The "Health" display says matched children are at risk</h3>
+      <span class="effort">Effort: Small</span>
+    </div>
+    <dl>
+      <dt>Plain English</dt>
+      <dd>The dashboard's "At risk" counter is overcounting. Children who are already happily
+        matched are still flagged red because a hidden "days waiting for a match" clock keeps
+        ticking after the match was made. This is purely a display bug, not a data bug — the
+        matches themselves are fine. (See Section 6 for the visual proof.)</dd>
+      <dt>Fix</dt>
+      <dd>When a match is approved, stop the clock. Either clear the
+        <code>match_guarantee_start_date</code> field or have the "health" calculation
+        ignore children whose status is "Matched".</dd>
+      <dt>Effort</dt>
+      <dd>2–4 hours.</dd>
+    </dl>
+  </div>
+
+  <!-- 4.6 -->
+  <div class="issue">
+    <div class="header">
+      <span class="badge sev-high">Important</span>
+      <h3>4.6 Server may not see real visitor IPs</h3>
+      <span class="effort">Effort: Tiny</span>
+    </div>
+    <dl>
+      <dt>Plain English</dt>
+      <dd>The login rate-limiter (20 tries per 15 minutes) is meant to be per visitor. But
+        because the app sits behind Replit's network, the server may see Replit's address
+        for every visitor instead of the visitor's true address. Result: either every visitor
+        in the world counts as one (so 20 attempts kicks in instantly for everyone), or the
+        limit is effectively bypassed.</dd>
+      <dt>Fix</dt>
+      <dd>Add one line to the server config: <code>app.set('trust proxy', 1)</code>. Then
+        verify the right behaviour by attempting 21 fast logins.</dd>
+      <dt>Effort</dt>
+      <dd>15 minutes.</dd>
+    </dl>
+  </div>
+
+  <!-- 4.7 -->
+  <div class="issue">
+    <div class="header">
+      <span class="badge sev-high">Important</span>
+      <h3>4.7 Onboarding links never expire</h3>
+      <span class="effort">Effort: Small</span>
+    </div>
+    <dl>
+      <dt>Plain English</dt>
+      <dd>When a new customer signs up via Shopify, we email them a personalised link that
+        lets them add their child's details without a password. That link has no expiry
+        date — once it has been emailed, it works forever, and lets anyone who has the URL
+        add new children to that family's account.</dd>
+      <dt>Fix</dt>
+      <dd>Give onboarding links a 30-day expiry (matching most other "magic link" patterns),
+        and rotate the token after a child has been added.</dd>
+      <dt>Effort</dt>
+      <dd>2–4 hours.</dd>
+    </dl>
+  </div>
+</section>
+
+
+<!-- ============================== 5. NICE-TO-HAVES ============================== -->
+<section class="section">
+  <h2>5. Useful Improvements — Next Quarter</h2>
+
+  <p>None of these are blocking. They are the items that turn a working tool into a polished,
+  professionally-run product.</p>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:30%;">Item</th>
+        <th>What &amp; why</th>
+        <th style="width:14%;">Effort</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Audit trail</td>
+        <td>Today, if an admin or VA changes something important — a child's safety flag, a
+          parent's tier, a donation amount — there is no record of <em>who</em> changed it
+          and <em>when</em>. An audit log is one extra database table and a few lines of code,
+          and pays for itself the first time you need to ask "who did that?".</td>
+        <td>2–3 days</td>
+      </tr>
+      <tr>
+        <td>Two-factor authentication</td>
+        <td>Add a second factor (a 6-digit code from an app) for admin accounts. Industry
+          baseline for tools that touch children's data.</td>
+        <td>2 days</td>
+      </tr>
+      <tr>
+        <td>Automated tests</td>
+        <td>Today there are no automated tests. As the codebase grows this means every change
+          requires manual re-testing. A small core test suite (login, role boundaries, webhook
+          signatures) would catch the most common breakages.</td>
+        <td>1 week initially, then ongoing</td>
+      </tr>
+      <tr>
+        <td>Dependency monitoring</td>
+        <td>The app uses ~100 third-party packages. Some of them publish security updates
+          regularly. A free tool (e.g. GitHub Dependabot) can open a pull request when an
+          update is available.</td>
+        <td>1 hour setup</td>
+      </tr>
+      <tr>
+        <td>Generic error responses</td>
+        <td>Some routes return raw database error messages to the user when something goes
+          wrong. These messages can hint at the database structure. Catch them and return a
+          generic "Something went wrong" with a reference ID.</td>
+        <td>1 day</td>
+      </tr>
+      <tr>
+        <td>Privacy policy refresh</td>
+        <td>The app shares subsets of data with Shopify, ReCharge, Klaviyo, Anthropic,
+          Tremendous, Slack, and Resend. The privacy policy should name them and explain
+          what each receives.</td>
+        <td>1 day (with legal)</td>
+      </tr>
+      <tr>
+        <td>Pagination for tables</td>
+        <td>Children, Parents, Matches, Cancellations, Influencers all currently load every
+          row. At a few hundred records this slows down; at a few thousand it will break.</td>
+        <td>1–2 days total</td>
+      </tr>
+      <tr>
+        <td>HTML page metadata</td>
+        <td>The browser tab description still reads "MailDay Matching — built on Replit.
+          Update this description to reflect the app." Minor, but it's visible whenever
+          someone shares a link.</td>
+        <td>5 minutes</td>
+      </tr>
+      <tr>
+        <td>Accessibility audit</td>
+        <td>The component library is accessible by default, but a formal once-over (colour
+          contrast, focus indicators, screen-reader walkthrough) will surface a handful of
+          fixable items.</td>
+        <td>1 day</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+
+<!-- ============================== 6. The Display Bug ============================== -->
+<section class="section">
+  <h2>6. The "At Risk" Display Bug — A Worked Example</h2>
+
+  <p>
+    To make one of the findings concrete, here is the exact situation from the Children
+    Directory screen you shared:
+  </p>
+
+  <table>
+    <thead>
+      <tr><th>Child</th><th>Status</th><th>"Days waiting"</th><th>Should be flagged?</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Marco</td><td>Unmatched</td><td>393 days</td><td>Yes — genuinely overdue</td></tr>
+      <tr><td>Zara</td><td>Paused</td><td>662 days</td><td>Yes — billing paused, needs attention</td></tr>
+      <tr><td>Kofi</td><td>Rematch Requested</td><td>378 days</td><td>Yes — waiting for a new pen pal</td></tr>
+      <tr><td>Amara</td><td><strong>Matched</strong></td><td>382 days</td><td><strong>No — already matched</strong></td></tr>
+      <tr><td>Noah</td><td><strong>Matched</strong></td><td>462 days</td><td><strong>No — already matched</strong></td></tr>
+      <tr><td>Lily</td><td><strong>Matched</strong></td><td>385 days</td><td><strong>No — already matched</strong></td></tr>
+    </tbody>
+  </table>
+
+  <p>
+    The dashboard says "At risk: 6". The honest answer is "At risk: 3" — Amara, Noah, and
+    Lily are happily matched and should not be in that bucket. The fix is small and described
+    in section 4.5.
+  </p>
+
+  <div class="callout blue">
+    <strong class="tag">WHY IT MATTERS</strong>
+    Beyond accuracy, an inflated "at risk" number changes day-to-day behaviour. The team
+    starts the day looking at a red number that is twice the real one, the Slack digest
+    overstates urgency, and real problems can hide inside the noise.
+  </div>
+</section>
+
+
+<!-- ============================== 7. ROADMAP ============================== -->
+<section class="section">
+  <h2>7. Recommended Roadmap</h2>
+
+  <p>If you would like to give a single instruction to the developer based on this report,
+  the recommended order is:</p>
+
+  <h3>Week 1 — "Stop the bleeding"</h3>
+  <table>
+    <thead><tr><th style="width:65%;">Task</th><th>Est. effort</th></tr></thead>
+    <tbody>
+      <tr><td>Make webhook secrets mandatory (Section 3.2)</td><td>Half a day</td></tr>
+      <tr><td>Require email confirmation before changing addresses (Section 3.3)</td><td>1–2 days</td></tr>
+      <tr><td>Lock down receipt uploads + private storage (Section 3.4)</td><td>1 day</td></tr>
+      <tr><td>Remove or secure the public affiliate tracker (Section 3.5)</td><td>Half a day</td></tr>
+      <tr><td>Add <code>trust proxy</code> for correct rate limiting (Section 4.6)</td><td>15 minutes</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Week 2 — "Tighten the locks"</h3>
+  <table>
+    <thead><tr><th style="width:65%;">Task</th><th>Est. effort</th></tr></thead>
+    <tbody>
+      <tr><td>Move login key to a cookie + turn on CSP (Section 3.1)</td><td>1–2 days</td></tr>
+      <tr><td>Add short-lived tokens + server-side logout (Section 4.1)</td><td>2–3 days</td></tr>
+      <tr><td>Rate-limit forgot/reset/change password (Section 4.2)</td><td>Half a day</td></tr>
+      <tr><td>Remove the seed-data button from production (Section 4.3)</td><td>1 hour</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Week 3 — "Clean the windows"</h3>
+  <table>
+    <thead><tr><th style="width:65%;">Task</th><th>Est. effort</th></tr></thead>
+    <tbody>
+      <tr><td>Fix the "At Risk" health display (Section 4.5)</td><td>Half a day</td></tr>
+      <tr><td>Anonymise data sent to the matching AI (Section 4.4)</td><td>1 day</td></tr>
+      <tr><td>Expire onboarding links (Section 4.7)</td><td>Half a day</td></tr>
+      <tr><td>Update the page title/description (Section 5)</td><td>5 minutes</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Quarter 2 — "Future-proof"</h3>
+  <table>
+    <thead><tr><th style="width:65%;">Task</th><th>Est. effort</th></tr></thead>
+    <tbody>
+      <tr><td>Add an audit log table (Section 5)</td><td>2–3 days</td></tr>
+      <tr><td>Two-factor authentication for admins (Section 5)</td><td>2 days</td></tr>
+      <tr><td>Start a small automated test suite (Section 5)</td><td>1 week then ongoing</td></tr>
+      <tr><td>Dependency monitoring setup (Section 5)</td><td>1 hour</td></tr>
+      <tr><td>Accessibility &amp; pagination polish (Section 5)</td><td>2–3 days</td></tr>
+      <tr><td>Privacy policy refresh with legal (Section 5)</td><td>1 day with counsel</td></tr>
+    </tbody>
+  </table>
+
+  <div class="hero">
+    <strong>Total estimate to clear the Critical + Important list:</strong> roughly
+    <strong>11–14 developer days</strong>, ideally spread over three to four weeks.
+    The Critical list alone (Section 3) is about <strong>4 developer days</strong>.
+  </div>
+</section>
+
+
+<!-- ============================== 8. GLOSSARY ============================== -->
+<section class="section">
+  <h2>8. Glossary of Terms</h2>
+  <table>
+    <tbody>
+      <tr><td><strong>Webhook</strong></td>
+        <td>An automatic message one online service sends to another when something happens
+          (e.g. Shopify telling MailDay "an order was just placed").</td></tr>
+      <tr><td><strong>HMAC signature</strong></td>
+        <td>A short code added to a webhook message that proves it really came from the
+          claimed sender, the way a wax seal proves a letter wasn't tampered with.</td></tr>
+      <tr><td><strong>Token</strong></td>
+        <td>A short string of letters and numbers that says "the holder of this string is
+          logged in as X". Like a paper wristband at a concert.</td></tr>
+      <tr><td><strong>localStorage</strong></td>
+        <td>A small storage area in the browser that any script on the page can read and write.
+          Convenient but not private.</td></tr>
+      <tr><td><strong>HttpOnly cookie</strong></td>
+        <td>A special cookie that the browser will send to the server automatically, but
+          scripts on the page <em>cannot</em> read. The recommended place to store login keys.</td></tr>
+      <tr><td><strong>CSP (Content Security Policy)</strong></td>
+        <td>A list of rules the server sends to the browser saying "only run scripts from
+          these places". Blocks most cross-site-scripting attacks.</td></tr>
+      <tr><td><strong>XSS (Cross-Site Scripting)</strong></td>
+        <td>A bug where attacker-supplied text is rendered as code by the browser. The main
+          way login keys in localStorage get stolen.</td></tr>
+      <tr><td><strong>Rate limiting</strong></td>
+        <td>Refusing to answer if requests come in too fast from the same place. A speed bump.</td></tr>
+      <tr><td><strong>Bcrypt hash</strong></td>
+        <td>A one-way scramble of a password. The original cannot be recovered. The standard
+          way to store passwords.</td></tr>
+      <tr><td><strong>Service-role key</strong></td>
+        <td>A master key for the Supabase database that bypasses all access rules. The server
+          has it; nothing else should.</td></tr>
+      <tr><td><strong>RLS (Row Level Security)</strong></td>
+        <td>A Supabase feature that locks down individual database rows by user. Currently
+          off in MailDay because the Express server is the only thing allowed to touch the DB.</td></tr>
+      <tr><td><strong>COPPA</strong></td>
+        <td>A US law about collecting personal information from children under 13.
+          Relevant because MailDay stores child data.</td></tr>
+      <tr><td><strong>SPA (Single Page Application)</strong></td>
+        <td>A website that loads once and then redraws itself as you click. MailDay is one.</td></tr>
+    </tbody>
+  </table>
+
+  <div style="margin-top: 28pt; padding-top: 12pt; border-top: 1px solid #e5e7eb; font-size: 9pt; color: #888;">
+    Prepared for MailDay Leadership · May 19, 2026 · Confidential ·
+    Findings based on a review of the codebase, database schema, and live admin UI.
+  </div>
+</section>
+
+</body>
+</html>

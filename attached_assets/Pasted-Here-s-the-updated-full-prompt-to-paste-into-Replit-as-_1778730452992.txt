@@ -1,0 +1,114 @@
+Here's the updated full prompt to paste into Replit as a follow-up to what's already built:
+
+---
+
+Add Give a Key functionality to the existing MailDay Matching app. This is a sponsored PO Box program — donors contribute to a communal fund and approved applicants receive funds to cover their PO Box setup cost. The membership subscription is NOT covered — applicants are responsible for their own monthly MailDay membership fee.
+
+**Two new tables in Supabase:**
+
+Give a Key Collections table: id, donor_first_name, donor_last_name, donor_email, donation_amount, donation_date, notes, created_date
+
+Give a Key Applications table: id, parent_first_name, parent_last_name, parent_email, parent_phone, state, mailing_address, address_type, child_first_name, child_age, child_interests (array — same picklist as Children table), statement_of_need (long text), po_box_acknowledgment (boolean — required), subscription_acknowledgment (boolean — required), application_date, application_status (Pending / Approved / Waitlisted / Rejected / Active), activation_date, po_box_address (text — submitted after approval), po_box_receipt_url (file upload), receipt_verified (boolean), tremendous_sent (boolean), tremendous_sent_date, internal_notes, created_date
+
+**The fund balance logic:**
+Total donations received minus total PO Box disbursements approved. Admin sets the average PO Box reimbursement amount in settings (default $75). Fund balance = total donations minus (number of Active applications multiplied by reimbursement amount). Display this prominently on the Give a Key Dashboard.
+
+**The public-facing application form:**
+Build this as a public page with its own URL that can be shared or linked from the website. No login required. Fields:
+
+- Parent first name — required
+- Parent last name — required
+- Email address — required
+- Phone number — optional
+- State — required — dropdown all 50 states
+- Child first name — required
+- Child age — required — number 3-12
+- Child interests — required — multiselect up to 5 — same picklist as Children table
+- Statement of need — required — long text — label: "Tell us a little about your family and why a PO Box would help your child participate" — no income verification, no documentation required
+- Required checkbox 1: "I understand that Give a Key covers the cost of my PO Box setup only. My monthly MailDay membership is a separate charge I am responsible for."
+- Required checkbox 2: "I understand that if approved, I will need to set up my own PO Box at my local USPS location using the funds provided."
+- Submit button
+
+On successful submission: show a confirmation message — "We received your application and will be in touch within 48 hours. You won't fall through the cracks."
+
+Application record created in Supabase with status Pending.
+
+**The admin application flow:**
+
+1. Admin sees all Pending applications in a queue sorted by application date oldest first
+2. Each application card shows: child name, age, state, interests, statement of need, days since application
+3. Admin has three actions: Approve, Waitlist, Reject
+
+Approve + fund balance covers reimbursement amount:
+- Status sets to Approved
+- Tremendous disbursement flagged as needed — show a banner on the record: "Send funds via Tremendous before notifying family" — admin marks tremendous_sent manually after sending
+- Klaviyo approval email webhook fires (placeholder — connect later) — email tells family funds are on the way, includes link to PO Box submission form
+- No child record created yet
+
+Approve + fund balance does not cover reimbursement amount:
+- Status sets to Waitlisted
+- Klaviyo waitlist email webhook fires (placeholder)
+- Family told they are approved and on the waitlist
+
+Reject:
+- Admin must enter rejection reason before confirming
+- Status sets to Rejected
+- Klaviyo rejection email webhook fires (placeholder)
+- Rejection is only for fraudulent or clearly ineligible applications — fund shortfalls always go to waitlist
+
+**The PO Box submission flow:**
+After approval family receives a link to a second public form — PO Box Submission. Fields:
+- Email address — required — used to find their application record
+- PO Box address — required
+- Receipt upload — required — image or PDF
+
+On submission: updates application record with po_box_address and po_box_receipt_url. Admin sees a new badge on the record: "Receipt submitted — pending verification."
+
+Admin reviews receipt in app, clicks Verify Receipt:
+- Receipt_verified sets to true
+- Child record automatically created in Children table
+- Parent record automatically created in Parents table using application contact details
+- Give a Key Recipient field on Parent record sets to true
+- Child enters unmatched queue as a normal member
+- Application status sets to Active
+- Klaviyo activation email webhook fires (placeholder) — tells family their membership is active and their child will be matched on the next Friday
+
+**When a new donation is recorded and waitlisted applications exist:**
+App surfaces a banner on the Give a Key Dashboard: "Fund updated — [X] waitlisted families may now be eligible for activation." Button opens waitlist sorted by application date. Admin reviews and approves in order.
+
+**The four admin views:**
+
+1. Give a Key Dashboard — fund balance prominently displayed, total donations to date, number of active sponsored members, number of pending applications, number of waitlisted families, number of receipts pending verification, Tremendous pending banner if any approved applications have tremendous_sent = false, waitlist activation banner when fund allows
+
+2. Applications Queue — all pending applications sorted oldest first, approve / waitlist / reject actions, receipt pending verification badges
+
+3. Waitlist — all waitlisted applications sorted by application date, one-click approval when fund allows
+
+4. Donations Log — all donations recorded manually by admin, fields: donor first name, donor last name, donor email, donation amount, donation date, notes, running total displayed, searchable by donor name and email, sortable by date and amount
+
+**Donations are recorded manually by admin in the Donations Log — there is no automated Shopify connection yet. Admin enters each donation after it processes in Shopify.**
+
+**Access by role:**
+Admin — full access to all Give a Key views including Donations Log and fund balance
+VA — can see Applications Queue and Waitlist, can action applications, cannot see Donations Log, fund balance details, or donor information
+
+**Add to the existing left navigation:**
+Give a Key section with four items: Dashboard, Applications, Waitlist, Donations
+
+**Build in this order:**
+1. Supabase schema additions — two new tables plus any modifications to existing tables
+2. Public application form
+3. Public PO Box submission form
+4. Admin Applications Queue
+5. Approve / waitlist / reject flow
+6. Receipt verification flow and child record auto-creation
+7. Donations Log with manual entry
+8. Give a Key Dashboard with fund balance
+9. Waitlist view
+10. Navigation updates
+
+Show me the Supabase schema additions first and ask me to confirm before writing any frontend code.
+
+---
+
+Paste that in as a follow-up in the same Replit chat.

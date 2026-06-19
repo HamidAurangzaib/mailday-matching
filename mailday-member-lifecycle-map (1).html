@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MailDay — Member Lifecycle Map</title>
+<style>
+  :root{
+    --red:#DD4B39; --yellow:#FFD23F; --cream:#FFF5E6; --blue:#4AADDE; --ink:#1A1A1A;
+    --paper:#FFFDF8; --line:#E4DECF;
+    --blue-f:#E6F1FB; --blue-s:#185FA5; --blue-t:#0C447C;
+    --purple-f:#EEEDFE; --purple-s:#534AB7; --purple-t:#3C3489;
+    --amber-f:#FAEEDA; --amber-s:#BA7517; --amber-t:#854F0B;
+    --green-f:#EAF3DE; --green-s:#3B6D11; --green-t:#27500A;
+    --red-f:#FCEBEB; --red-s:#A32D2D; --red-t:#791F1F;
+    --gray-f:#F1EFE8; --gray-s:#5F5E5A; --gray-t:#444441;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;}
+  body{
+    background:var(--cream); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.6; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1120px; margin:0 auto; padding:48px 32px 90px;}
+
+  header{border-bottom:3px solid var(--red); padding-bottom:24px;}
+  .brand{font-size:12.5px; letter-spacing:.15em; text-transform:uppercase; color:var(--red); font-weight:700; margin:0 0 6px;}
+  h1{font-size:34px; margin:0 0 8px; font-weight:800; letter-spacing:-.01em;}
+  .sub{font-size:15px; color:#6b6657; margin:0;}
+  .meta{font-size:12px; color:#9a9486; margin-top:14px;}
+
+  .intro{
+    background:var(--paper); border:1px solid var(--line); border-radius:14px;
+    padding:22px 26px; margin:26px 0 6px;
+  }
+  .intro p{margin:0 0 10px; font-size:14.5px;}
+  .intro p:last-child{margin-bottom:0;}
+  .intro strong{color:var(--ink);}
+  .hint{
+    display:flex; align-items:center; gap:9px; margin-top:14px;
+    font-size:13px; color:var(--red); font-weight:600;
+  }
+  .hint .dot{width:9px; height:9px; border-radius:50%; background:var(--red); flex-shrink:0;
+    animation:pulse 1.8s ease-in-out infinite;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+
+  .tabs{display:flex; flex-wrap:wrap; gap:8px; margin:26px 0 22px;}
+  .tab{
+    padding:10px 18px; font-size:14px; font-weight:600; cursor:pointer;
+    border:1px solid var(--line); border-radius:9px; background:var(--paper);
+    color:#6b6657; transition:.14s;
+  }
+  .tab:hover{background:#fff;}
+  .tab.on{background:var(--red); color:#fff; border-color:var(--red);}
+
+  .view{display:none;}
+  .view.on{display:block;}
+  .view-head{font-size:21px; font-weight:800; margin:6px 0 2px;}
+  .view-note{font-size:14px; color:#6b6657; margin:0 0 18px;}
+
+  .card-frame{
+    background:var(--paper); border:1px solid var(--line); border-radius:14px;
+    padding:22px; overflow-x:auto;
+  }
+  svg{width:100%; height:auto; display:block; min-width:560px;}
+
+  .clk{cursor:pointer;}
+  .clk rect{transition:filter .12s;}
+  .clk:hover rect.hit{filter:brightness(0.96);}
+  .clk:focus{outline:none;}
+  .clk:focus rect.hit{stroke-width:2.4;}
+
+  .legend-wrap{
+    display:flex; flex-wrap:wrap; gap:16px 26px; margin:22px 0 0;
+    background:var(--paper); border:1px solid var(--line); border-radius:12px;
+    padding:18px 22px;
+  }
+  .legend-wrap h3{width:100%; margin:0 0 2px; font-size:12.5px; text-transform:uppercase; letter-spacing:.1em; color:#9a9486;}
+  .key{display:flex; align-items:center; gap:9px; font-size:13.5px; color:#4a4538;}
+  .sw{width:15px; height:15px; border-radius:4px; flex-shrink:0; border:1px solid rgba(0,0,0,.12);}
+
+  /* drawer */
+  .scrim{
+    position:fixed; inset:0; background:rgba(26,26,26,.42);
+    opacity:0; pointer-events:none; transition:opacity .2s; z-index:40;
+  }
+  .scrim.on{opacity:1; pointer-events:auto;}
+  .drawer{
+    position:fixed; top:0; right:0; height:100%; width:430px; max-width:92vw;
+    background:var(--cream); box-shadow:-8px 0 32px rgba(26,26,26,.18);
+    transform:translateX(100%); transition:transform .24s ease; z-index:50;
+    display:flex; flex-direction:column;
+  }
+  .drawer.on{transform:translateX(0);}
+  .drawer-top{
+    padding:22px 24px 16px; border-bottom:1px solid var(--line); flex-shrink:0;
+    background:var(--paper);
+  }
+  .drawer-kicker{font-size:11.5px; letter-spacing:.13em; text-transform:uppercase; font-weight:700; margin:0 0 6px;}
+  .drawer-title{font-size:20px; font-weight:800; margin:0; line-height:1.25;}
+  .drawer-close{
+    position:absolute; top:18px; right:18px; width:30px; height:30px;
+    border:1px solid var(--line); border-radius:8px; background:var(--cream);
+    cursor:pointer; font-size:17px; line-height:1; color:#6b6657;
+  }
+  .drawer-close:hover{background:#fff;}
+  .drawer-body{padding:20px 24px 40px; overflow-y:auto;}
+
+  .field{margin:0 0 18px;}
+  .field-label{
+    font-size:11.5px; letter-spacing:.1em; text-transform:uppercase;
+    font-weight:700; color:#9a9486; margin:0 0 5px;
+  }
+  .field-val{font-size:14px; margin:0; color:#3a3528;}
+  .field-val.who{
+    display:inline-block; padding:3px 11px; border-radius:7px;
+    font-size:13px; font-weight:600;
+  }
+  .auto-tag{background:var(--blue-f); color:var(--blue-t);}
+  .manual-tag{background:var(--gray-f); color:var(--gray-t);}
+
+  .tmpl{
+    background:#fff; border:1px solid var(--line); border-radius:10px;
+    padding:14px 16px; margin-top:6px;
+  }
+  .tmpl-flag{
+    display:inline-block; font-size:10.5px; font-weight:700; letter-spacing:.07em;
+    text-transform:uppercase; padding:3px 9px; border-radius:6px; margin-bottom:10px;
+    background:var(--amber-f); color:var(--amber-t);
+  }
+  .tmpl-flag.tbd{background:var(--gray-f); color:var(--gray-t);}
+  .tmpl-subj{font-size:13px; margin:0 0 8px; color:#6b6657;}
+  .tmpl-subj b{color:var(--ink);}
+  .tmpl-body{
+    font-size:13.5px; white-space:pre-wrap; margin:0; color:#3a3528;
+    font-family:"Georgia",serif; line-height:1.62;
+  }
+  .gap-note{
+    background:#fffaf0; border-left:4px solid var(--amber-s); border-radius:0 8px 8px 0;
+    padding:10px 14px; margin-top:6px; font-size:13px; color:#7a5f24;
+  }
+
+  .decisions, .gaps{
+    margin:30px 0 0; border-radius:14px; padding:24px 28px;
+  }
+  .decisions{background:var(--paper); border:1px solid var(--line);}
+  .decisions h2{font-size:18px; margin:0 0 4px;}
+  .decisions .dsub{font-size:13px; color:#9a9486; margin:0 0 16px;}
+  .decision{border-left:4px solid var(--green-s); padding:4px 0 4px 16px; margin:0 0 16px;}
+  .decision:last-child{margin-bottom:0;}
+  .decision .q{font-weight:700; font-size:14.5px; margin:0 0 4px;}
+  .decision .a{font-size:14px; color:#4a4538; margin:0;}
+  .decision .a b{color:var(--green-t);}
+
+  .gaps{background:#fffaf0; border:1px solid #f0d9a8;}
+  .gaps h2{font-size:18px; margin:0 0 4px; color:var(--amber-t);}
+  .gaps .gsub{font-size:13px; color:#a98b54; margin:0 0 14px;}
+  .gaps ol{margin:0; padding-left:20px;}
+  .gaps li{font-size:14px; margin:0 0 9px; color:#4a4538;}
+  .gaps li:last-child{margin-bottom:0;}
+  .gaps li b{color:var(--amber-t);}
+
+  footer{
+    margin-top:48px; padding-top:20px; border-top:1px solid var(--line);
+    font-size:12.5px; color:#9a9486; text-align:center;
+  }
+  footer .tag{font-style:italic; color:var(--red); font-weight:600;}
+
+  @media (max-width:640px){
+    .wrap{padding:30px 16px 60px;}
+    h1{font-size:25px;}
+    .drawer{width:100%;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <p class="brand">MailDay Matching &middot; Team Onboarding Reference</p>
+    <h1>Member Lifecycle Map</h1>
+    <p class="sub">Every path a member can travel &mdash; and the work behind each step.</p>
+    <p class="meta">Built for Courtney and anyone new joining the team. Last updated May 2026.</p>
+  </header>
+
+  <div class="intro">
+    <p>This map answers one question: <strong>what happens to a family, when, and who does it?</strong> If you are new to MailDay, this is the place to start &mdash; it shows the whole business as the journey one family takes through it.</p>
+    <p><strong>Quick context:</strong> MailDay matches kids with pen pals and mails them monthly themed packs &mdash; real letters, no screens. A parent subscribes, we match their child with another child by age and shared interests, and letters start crossing the country. This map traces that journey from sign-up to&hellip; wherever it ends.</p>
+    <p>It comes in two views. <strong>The Spine</strong> &mdash; everyone passes through it: subscribe, onboard, queue, match, active. <strong>The Branches</strong> &mdash; what happens after a match goes live, the five paths a member can fall into, and how they all resolve.</p>
+    <div class="hint"><span class="dot"></span>Click any box on the map to see exactly what that step involves &mdash; who does it, what to send, what happens next.</div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab on" onclick="showView(0,this)">1 &middot; The Spine</button>
+    <button class="tab" onclick="showView(1,this)">2 &middot; The Branches</button>
+  </div>
+
+  <!-- ===================== SPINE ===================== -->
+  <div class="view on" id="v0">
+    <p class="view-head">The Spine &mdash; subscribe to active match</p>
+    <p class="view-note">Everyone passes through this column. Branches peel off later, but they all begin here. Click a box for the detail.</p>
+    <div class="card-frame">
+      <svg viewBox="0 0 680 910" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="MailDay spine flowchart, subscribe through active match">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+            <path d="M2 1L8 5L2 9" fill="none" stroke="#8a8576" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </marker>
+        </defs>
+
+        <line x1="340" y1="68" x2="340" y2="96" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar)"/>
+        <line x1="340" y1="158" x2="340" y2="186" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar)"/>
+        <line x1="340" y1="248" x2="340" y2="328" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar)"/>
+        <line x1="340" y1="390" x2="340" y2="438" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar)"/>
+        <line x1="340" y1="514" x2="340" y2="552" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar)"/>
+        <line x1="340" y1="614" x2="340" y2="654" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar)"/>
+
+        <path d="M236 124 L120 124 L120 206" fill="none" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar)"/>
+        <path d="M120 290 L120 348 L236 348" fill="none" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar)"/>
+
+        <text x="556" y="296" text-anchor="middle" font-size="11.5" fill="#8a8576">day 21+ unmatched</text>
+        <path d="M444 217 L556 217 L556 314" fill="none" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar)"/>
+        <path d="M556 410 L556 462 L444 462" fill="none" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar)"/>
+
+        <g class="clk" tabindex="0" data-step="subscribe" role="button" aria-label="Parent subscribes step">
+          <rect class="hit" x="240" y="22" width="200" height="46" rx="9" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.7"/>
+          <text x="340" y="50" text-anchor="middle" font-size="14.5" font-weight="700" fill="#444441">Parent subscribes</text>
+        </g>
+
+        <g class="clk" tabindex="0" data-step="onboard" role="button" aria-label="Onboarding form step">
+          <rect class="hit" x="236" y="96" width="208" height="62" rx="9" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.7"/>
+          <text x="340" y="121" text-anchor="middle" font-size="14.5" font-weight="700" fill="#0C447C">Onboarding form</text>
+          <text x="340" y="140" text-anchor="middle" font-size="12.5" fill="#185FA5">Child profile created</text>
+        </g>
+
+        <g class="clk" tabindex="0" data-step="incomplete" role="button" aria-label="Incomplete onboarding step">
+          <rect class="hit" x="26" y="206" width="188" height="84" rx="9" fill="#FAEEDA" stroke="#BA7517" stroke-width="1.6"/>
+          <text x="120" y="230" text-anchor="middle" font-size="13.5" font-weight="700" fill="#854F0B">Incomplete onboarding</text>
+          <text x="120" y="248" text-anchor="middle" font-size="11.5" fill="#a17a2e">Paid, but no child yet</text>
+          <text x="120" y="265" text-anchor="middle" font-size="11.5" fill="#a17a2e">Nudge, then becomes</text>
+          <text x="120" y="281" text-anchor="middle" font-size="11.5" fill="#a17a2e">an action item</text>
+        </g>
+
+        <g class="clk" tabindex="0" data-step="queue" role="button" aria-label="Unmatched queue step">
+          <rect class="hit" x="236" y="186" width="208" height="62" rx="9" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.7"/>
+          <text x="340" y="211" text-anchor="middle" font-size="14.5" font-weight="700" fill="#0C447C">Unmatched queue</text>
+          <text x="340" y="230" text-anchor="middle" font-size="12.5" fill="#185FA5">Guarantee clock starts, day 0</text>
+        </g>
+
+        <g class="clk" tabindex="0" data-step="guarantee" role="button" aria-label="Guarantee breach step">
+          <rect class="hit" x="460" y="314" width="192" height="96" rx="9" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.7"/>
+          <text x="556" y="338" text-anchor="middle" font-size="13.5" font-weight="700" fill="#791F1F">Guarantee breach</text>
+          <text x="556" y="356" text-anchor="middle" font-size="11.5" fill="#A32D2D">Billing auto-paused</text>
+          <text x="556" y="372" text-anchor="middle" font-size="11.5" fill="#A32D2D">Contact the family</text>
+          <text x="556" y="388" text-anchor="middle" font-size="11.5" fill="#A32D2D">Pause in ReCharge</text>
+        </g>
+
+        <g class="clk" tabindex="0" data-step="match" role="button" aria-label="Match session step">
+          <rect class="hit" x="236" y="328" width="208" height="62" rx="9" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.7"/>
+          <text x="340" y="353" text-anchor="middle" font-size="14.5" font-weight="700" fill="#3C3489">Match session</text>
+          <text x="340" y="372" text-anchor="middle" font-size="12.5" fill="#534AB7">AI suggests, admin approves</text>
+        </g>
+
+        <g class="clk" tabindex="0" data-step="address" role="button" aria-label="Address confirmation step">
+          <rect class="hit" x="236" y="438" width="208" height="76" rx="9" fill="#FAEEDA" stroke="#BA7517" stroke-width="1.6"/>
+          <text x="340" y="462" text-anchor="middle" font-size="13.5" font-weight="700" fill="#854F0B">Address unconfirmed</text>
+          <text x="340" y="480" text-anchor="middle" font-size="11.5" fill="#a17a2e">Match notification sent</text>
+          <text x="340" y="497" text-anchor="middle" font-size="11.5" fill="#a17a2e">Confirm both addresses</text>
+        </g>
+
+        <g class="clk" tabindex="0" data-step="active" role="button" aria-label="Active match step">
+          <rect class="hit" x="236" y="552" width="208" height="62" rx="9" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.7"/>
+          <text x="340" y="577" text-anchor="middle" font-size="14.5" font-weight="700" fill="#27500A">Active match</text>
+          <text x="340" y="596" text-anchor="middle" font-size="12.5" fill="#3B6D11">Monthly packs ship</text>
+        </g>
+
+        <g class="clk" tabindex="0" data-step="fork" role="button" aria-label="Branch point">
+          <rect class="hit" x="196" y="654" width="288" height="62" rx="9" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.7"/>
+          <text x="340" y="679" text-anchor="middle" font-size="14" font-weight="700" fill="#444441">An active member can now branch</text>
+          <text x="340" y="698" text-anchor="middle" font-size="12" fill="#5F5E5A">Five paths &mdash; open view 2, The Branches</text>
+        </g>
+
+        <rect x="40" y="760" width="600" height="116" rx="11" fill="none" stroke="#c9c2ad" stroke-width="0.9" stroke-dasharray="4 4"/>
+        <text x="62" y="786" font-size="13" font-weight="700" fill="#444441">Reading this map</text>
+        <rect x="62" y="800" width="14" height="14" rx="3" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.7"/>
+        <text x="86" y="812" font-size="12.5" fill="#4a4538">Blue &mdash; app does it automatically</text>
+        <rect x="62" y="826" width="14" height="14" rx="3" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.7"/>
+        <text x="86" y="838" font-size="12.5" fill="#4a4538">Gray &mdash; a person does it manually</text>
+        <rect x="360" y="800" width="14" height="14" rx="3" fill="#FAEEDA" stroke="#BA7517" stroke-width="1.4"/>
+        <text x="384" y="812" font-size="12.5" fill="#4a4538">Amber &mdash; open gap, confirm with developer</text>
+        <rect x="360" y="826" width="14" height="14" rx="3" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.7"/>
+        <text x="384" y="838" font-size="12.5" fill="#4a4538">Green &mdash; a healthy resting state</text>
+        <text x="62" y="864" font-size="11.5" fill="#9a9486" font-style="italic">Every box is clickable &mdash; tap one for the full step detail.</text>
+      </svg>
+    </div>
+  </div>
+
+  <!-- ===================== BRANCHES ===================== -->
+  <div class="view" id="v1">
+    <p class="view-head">The Branches &mdash; after a match goes live</p>
+    <p class="view-note">Five paths an active member can fall into. They fan out at the top &mdash; then notice how they narrow: every dissolved match funnels into one re-queue path, every exit into one offboarding path. Click any box for detail.</p>
+    <div class="card-frame">
+      <svg viewBox="0 0 940 1320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="MailDay branch flowchart, five member paths">
+        <defs>
+          <marker id="ar2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+            <path d="M2 1L8 5L2 9" fill="none" stroke="#8a8576" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </marker>
+        </defs>
+
+        <!-- lane x-centers: 110 / 290 / 470 / 650 / 830 -->
+
+        <!-- active match -->
+        <g class="clk" tabindex="0" data-step="active" role="button" aria-label="Active match">
+          <rect class="hit" x="380" y="24" width="180" height="48" rx="9" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.7"/>
+          <text x="470" y="53" text-anchor="middle" font-size="14.5" font-weight="700" fill="#27500A">Active match</text>
+        </g>
+
+        <!-- distributor bar -->
+        <line x1="470" y1="72" x2="470" y2="92" stroke="#8a8576" stroke-width="1.6"/>
+        <line x1="110" y1="92" x2="830" y2="92" stroke="#8a8576" stroke-width="1.6"/>
+        <line x1="110" y1="92" x2="110" y2="120" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar2)"/>
+        <line x1="290" y1="92" x2="290" y2="120" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar2)"/>
+        <line x1="470" y1="92" x2="470" y2="120" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar2)"/>
+        <line x1="650" y1="92" x2="650" y2="120" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar2)"/>
+        <line x1="830" y1="92" x2="830" y2="120" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar2)"/>
+
+        <!-- branch heads -->
+        <g class="clk" tabindex="0" data-step="rematch" role="button" aria-label="Rematch branch">
+          <rect class="hit" x="34" y="120" width="152" height="74" rx="9" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.7"/>
+          <text x="110" y="143" text-anchor="middle" font-size="13.5" font-weight="700" fill="#3C3489">Rematch</text>
+          <text x="110" y="161" text-anchor="middle" font-size="11.5" fill="#534AB7">Parent asks for</text>
+          <text x="110" y="177" text-anchor="middle" font-size="11.5" fill="#534AB7">a new pen pal</text>
+        </g>
+        <g class="clk" tabindex="0" data-step="ghosting" role="button" aria-label="Ghosting branch">
+          <rect class="hit" x="214" y="120" width="152" height="74" rx="9" fill="#FAEEDA" stroke="#BA7517" stroke-width="0.7"/>
+          <text x="290" y="143" text-anchor="middle" font-size="13.5" font-weight="700" fill="#854F0B">Ghosting</text>
+          <text x="290" y="161" text-anchor="middle" font-size="11.5" fill="#a17a2e">Stops opening</text>
+          <text x="290" y="177" text-anchor="middle" font-size="11.5" fill="#a17a2e">email, still pays</text>
+        </g>
+        <g class="clk" tabindex="0" data-step="tier" role="button" aria-label="Tier change branch">
+          <rect class="hit" x="394" y="120" width="152" height="74" rx="9" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.7"/>
+          <text x="470" y="143" text-anchor="middle" font-size="13.5" font-weight="700" fill="#0C447C">Tier change</text>
+          <text x="470" y="161" text-anchor="middle" font-size="11.5" fill="#185FA5">Up, down, or</text>
+          <text x="470" y="177" text-anchor="middle" font-size="11.5" fill="#185FA5">ages out of Minis</text>
+        </g>
+        <g class="clk" tabindex="0" data-step="pause" role="button" aria-label="Voluntary pause branch">
+          <rect class="hit" x="574" y="120" width="152" height="74" rx="9" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.7"/>
+          <text x="650" y="143" text-anchor="middle" font-size="13.5" font-weight="700" fill="#444441">Voluntary pause</text>
+          <text x="650" y="161" text-anchor="middle" font-size="11.5" fill="#5F5E5A">Parent pauses</text>
+          <text x="650" y="177" text-anchor="middle" font-size="11.5" fill="#5F5E5A">in ReCharge</text>
+        </g>
+        <g class="clk" tabindex="0" data-step="cancel" role="button" aria-label="Cancellation branch">
+          <rect class="hit" x="754" y="120" width="152" height="74" rx="9" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.7"/>
+          <text x="830" y="143" text-anchor="middle" font-size="13.5" font-weight="700" fill="#791F1F">Cancellation</text>
+          <text x="830" y="161" text-anchor="middle" font-size="11.5" fill="#A32D2D">Parent ends</text>
+          <text x="830" y="177" text-anchor="middle" font-size="11.5" fill="#A32D2D">membership</text>
+        </g>
+
+        <!-- row 2 connectors -->
+        <line x1="110" y1="194" x2="110" y2="228" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar2)"/>
+        <line x1="290" y1="194" x2="290" y2="228" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar2)"/>
+        <line x1="470" y1="194" x2="470" y2="228" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar2)"/>
+        <line x1="650" y1="194" x2="650" y2="228" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar2)"/>
+        <line x1="830" y1="194" x2="830" y2="228" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar2)"/>
+
+        <!-- row 2 boxes -->
+        <g class="clk" tabindex="0" data-step="rematch-closed" role="button" aria-label="Match closed">
+          <rect class="hit" x="34" y="228" width="152" height="74" rx="9" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.7"/>
+          <text x="110" y="251" text-anchor="middle" font-size="13" font-weight="700" fill="#3C3489">Match closed</text>
+          <text x="110" y="269" text-anchor="middle" font-size="11.5" fill="#534AB7">Reason logged,</text>
+          <text x="110" y="285" text-anchor="middle" font-size="11.5" fill="#534AB7">priority next batch</text>
+        </g>
+        <g class="clk" tabindex="0" data-step="atrisk" role="button" aria-label="At-risk flag">
+          <rect class="hit" x="214" y="228" width="152" height="74" rx="9" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.7"/>
+          <text x="290" y="251" text-anchor="middle" font-size="13" font-weight="700" fill="#0C447C">At-risk flag</text>
+          <text x="290" y="269" text-anchor="middle" font-size="11.5" fill="#185FA5">Two packs missed,</text>
+          <text x="290" y="285" text-anchor="middle" font-size="11.5" fill="#185FA5">Klaviyo auto-fires</text>
+        </g>
+        <g class="clk" tabindex="0" data-step="mismatch" role="button" aria-label="Mismatch flagged">
+          <rect class="hit" x="394" y="228" width="152" height="74" rx="9" fill="#E6F1FB" stroke="#185FA5" stroke-width="1.6"/>
+          <text x="470" y="251" text-anchor="middle" font-size="13" font-weight="700" fill="#0C447C">Mismatch flagged</text>
+          <text x="470" y="269" text-anchor="middle" font-size="11.5" fill="#185FA5">Cross-tier pair</text>
+          <text x="470" y="285" text-anchor="middle" font-size="11.5" fill="#185FA5">sent for review</text>
+        </g>
+        <g class="clk" tabindex="0" data-step="held" role="button" aria-label="Match held">
+          <rect class="hit" x="574" y="228" width="152" height="74" rx="9" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.7"/>
+          <text x="650" y="251" text-anchor="middle" font-size="13" font-weight="700" fill="#27500A">Match held</text>
+          <text x="650" y="269" text-anchor="middle" font-size="11.5" fill="#3B6D11">Not a guarantee</text>
+          <text x="650" y="285" text-anchor="middle" font-size="11.5" fill="#3B6D11">case; resumes later</text>
+        </g>
+        <g class="clk" tabindex="0" data-step="pauseoffer" role="button" aria-label="Pause offer">
+          <rect class="hit" x="754" y="228" width="152" height="74" rx="9" fill="#FAEEDA" stroke="#BA7517" stroke-width="0.7"/>
+          <text x="830" y="251" text-anchor="middle" font-size="13" font-weight="700" fill="#854F0B">Pause offer</text>
+          <text x="830" y="269" text-anchor="middle" font-size="11.5" fill="#a17a2e">1&ndash;3 months,</text>
+          <text x="830" y="285" text-anchor="middle" font-size="11.5" fill="#a17a2e">retention save</text>
+        </g>
+
+        <!-- row 3: ghosting win-back -->
+        <line x1="290" y1="302" x2="290" y2="336" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar2)"/>
+        <g class="clk" tabindex="0" data-step="winback" role="button" aria-label="Win-back attempt">
+          <rect class="hit" x="214" y="336" width="152" height="90" rx="9" fill="#FAEEDA" stroke="#BA7517" stroke-width="1.6"/>
+          <text x="290" y="359" text-anchor="middle" font-size="13" font-weight="700" fill="#854F0B">Win-back attempt</text>
+          <text x="290" y="377" text-anchor="middle" font-size="11.5" fill="#a17a2e">Email sequence,</text>
+          <text x="290" y="393" text-anchor="middle" font-size="11.5" fill="#a17a2e">then one Poppy</text>
+          <text x="290" y="409" text-anchor="middle" font-size="11.5" fill="#a17a2e">card by mail</text>
+        </g>
+
+        <!-- pause held continues down -->
+        <line x1="650" y1="302" x2="650" y2="900" stroke="#8a8576" stroke-width="1.6"/>
+
+        <!-- converge to orphaned partner (row 4, center 470) -->
+        <g class="clk" tabindex="0" data-step="orphan" role="button" aria-label="Partner orphaned">
+          <rect class="hit" x="346" y="486" width="248" height="78" rx="9" fill="#FCEBEB" stroke="#A32D2D" stroke-width="1.6"/>
+          <text x="470" y="510" text-anchor="middle" font-size="13.5" font-weight="700" fill="#791F1F">Partner orphaned</text>
+          <text x="470" y="528" text-anchor="middle" font-size="11.5" fill="#A32D2D">Every dissolved match leaves a child</text>
+          <text x="470" y="545" text-anchor="middle" font-size="11.5" fill="#A32D2D">whose pen pal is suddenly gone</text>
+        </g>
+        <!-- rematch-closed -> orphan -->
+        <path d="M110 302 L110 525 L344 525" fill="none" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar2)"/>
+        <!-- mismatch -> orphan -->
+        <line x1="470" y1="302" x2="470" y2="486" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar2)"/>
+        <!-- cancel pauseoffer -> orphan -->
+        <path d="M830 302 L830 525 L596 525" fill="none" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar2)"/>
+
+        <!-- shared re-queue (row 5, center 470) -->
+        <line x1="470" y1="564" x2="470" y2="600" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar2)"/>
+        <g class="clk" tabindex="0" data-step="requeue" role="button" aria-label="Shared re-queue path">
+          <rect class="hit" x="332" y="600" width="276" height="90" rx="9" fill="#EEEDFE" stroke="#534AB7" stroke-width="1.6"/>
+          <text x="470" y="626" text-anchor="middle" font-size="14" font-weight="700" fill="#3C3489">Shared re-queue path</text>
+          <text x="470" y="645" text-anchor="middle" font-size="11.5" fill="#534AB7">Status &rarr; unmatched. Guarantee clock</text>
+          <text x="470" y="661" text-anchor="middle" font-size="11.5" fill="#534AB7">resets to day 0. One path, every branch.</text>
+          <text x="470" y="679" text-anchor="middle" font-size="11" fill="#7a72c4" font-style="italic">leads back into matching &mdash; view 1</text>
+        </g>
+        <!-- requeue loops back up -->
+        <path d="M332 645 L260 645 L260 470 L290 470 L290 426" fill="none" stroke="#8a8576" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar2)"/>
+        <text x="210" y="455" text-anchor="middle" font-size="11" fill="#9a9486">re-enters</text>
+        <text x="210" y="469" text-anchor="middle" font-size="11" fill="#9a9486">matching</text>
+
+        <!-- ghosting: winback fails -> offboard ; winback works -> re-engaged -->
+        <line x1="290" y1="426" x2="290" y2="770" stroke="#8a8576" stroke-width="1.6"/>
+        <g class="clk" tabindex="0" data-step="winfail" role="button" aria-label="Win-back fails">
+          <rect class="hit" x="214" y="770" width="152" height="60" rx="9" fill="#FAEEDA" stroke="#BA7517" stroke-width="0.7"/>
+          <text x="290" y="794" text-anchor="middle" font-size="12.5" font-weight="700" fill="#854F0B">Win-back fails</text>
+          <text x="290" y="812" text-anchor="middle" font-size="11.5" fill="#a17a2e">Moves to exit</text>
+        </g>
+
+        <g class="clk" tabindex="0" data-step="reengaged" role="button" aria-label="Re-engaged">
+          <rect class="hit" x="34" y="1010" width="170" height="74" rx="9" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.7"/>
+          <text x="119" y="1033" text-anchor="middle" font-size="13.5" font-weight="700" fill="#27500A">Re-engaged</text>
+          <text x="119" y="1051" text-anchor="middle" font-size="11.5" fill="#3B6D11">Win-back works,</text>
+          <text x="119" y="1067" text-anchor="middle" font-size="11.5" fill="#3B6D11">back to active match</text>
+        </g>
+        <path d="M214 800 L119 800 L119 1010" fill="none" stroke="#8a8576" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar2)"/>
+
+        <!-- shared offboarding (center 470, row 7) -->
+        <g class="clk" tabindex="0" data-step="offboard" role="button" aria-label="Shared offboarding path">
+          <rect class="hit" x="332" y="900" width="276" height="100" rx="9" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1.6"/>
+          <text x="470" y="927" text-anchor="middle" font-size="14" font-weight="700" fill="#444441">Shared offboarding path</text>
+          <text x="470" y="946" text-anchor="middle" font-size="11.5" fill="#5F5E5A">Cancellation logged, reason coded</text>
+          <text x="470" y="962" text-anchor="middle" font-size="11.5" fill="#5F5E5A">Child status set to cancelled</text>
+          <text x="470" y="978" text-anchor="middle" font-size="11.5" fill="#5F5E5A">Win-back email at day 30</text>
+        </g>
+        <!-- winfail -> offboard -->
+        <path d="M290 830 L290 948 L330 948" fill="none" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar2)"/>
+        <!-- cancel held line (650) -> offboard -->
+        <path d="M650 900 L650 948 L610 948" fill="none" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar2)"/>
+
+        <!-- data deletion -->
+        <line x1="470" y1="1000" x2="470" y2="1036" stroke="#8a8576" stroke-width="1.6" marker-end="url(#ar2)"/>
+        <g class="clk" tabindex="0" data-step="deletion" role="button" aria-label="Data deletion">
+          <rect class="hit" x="346" y="1036" width="248" height="78" rx="9" fill="#FAEEDA" stroke="#BA7517" stroke-width="1.6"/>
+          <text x="470" y="1060" text-anchor="middle" font-size="13.5" font-weight="700" fill="#854F0B">Data deletion on request</text>
+          <text x="470" y="1078" text-anchor="middle" font-size="11.5" fill="#a17a2e">COPPA &mdash; includes match history</text>
+          <text x="470" y="1095" text-anchor="middle" font-size="11.5" fill="#a17a2e">Admin-only, and logged</text>
+        </g>
+
+        <!-- legend -->
+        <rect x="652" y="1036" width="254" height="148" rx="11" fill="none" stroke="#c9c2ad" stroke-width="0.9" stroke-dasharray="4 4"/>
+        <text x="674" y="1062" font-size="13" font-weight="700" fill="#444441">Legend</text>
+        <rect x="674" y="1076" width="14" height="14" rx="3" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.7"/>
+        <text x="698" y="1088" font-size="12" fill="#4a4538">Automatic</text>
+        <rect x="674" y="1100" width="14" height="14" rx="3" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.7"/>
+        <text x="698" y="1112" font-size="12" fill="#4a4538">Manual step</text>
+        <rect x="674" y="1124" width="14" height="14" rx="3" fill="#FAEEDA" stroke="#BA7517" stroke-width="1.4"/>
+        <text x="698" y="1136" font-size="12" fill="#4a4538">Open gap to confirm</text>
+        <rect x="674" y="1148" width="14" height="14" rx="3" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.7"/>
+        <text x="698" y="1160" font-size="12" fill="#4a4538">Healthy resting state</text>
+      </svg>
+    </div>
+  </div>
+
+  <div class="decisions">
+    <h2>Settled policy decisions</h2>
+    <p class="dsub">These two choices are locked into the map. Change them only deliberately.</p>
+    <div class="decision">
+      <p class="q">The guarantee clock on a dissolved match</p>
+      <p class="a">When a match ends &mdash; rematch, a cancelled partner, or a tier mismatch &mdash; the orphaned child re-enters the queue and the 21-day clock <b>resets to day 0</b>. A child who already waited a full cycle and then lost a pen pal is not penalized for it.</p>
+    </div>
+    <div class="decision">
+      <p class="q">The win-back trigger and sequence for a ghosting family</p>
+      <p class="a">Ghosting is defined as <b>two consecutive monthly pack emails opened by neither</b> &mdash; roughly a 45-day window, since packs send on the 1st. Newsletter opens don't count; the pack email is the product. When a family hits that threshold, <b>Klaviyo automatically starts the win-back email sequence</b> and flags the family at-risk in the app. If the sequence ends with the family still disengaged, the app creates a task and <b>Courtney mails one handwritten Poppy card</b>. Only two human touches in the whole branch: mailing the card and marking it done.</p>
+    </div>
+  </div>
+
+  <div class="gaps">
+    <h2>Open gaps &mdash; the amber boxes</h2>
+    <p class="gsub">Each amber box is a question for the developer. When the audit comes back, every one should resolve to "confirmed" or "built."</p>
+    <ol>
+      <li><b>Incomplete onboarding</b> &mdash; a paid family that never finished the form must be nudged, then surface in Action Items.</li>
+      <li><b>Address unconfirmed</b> &mdash; a matched child with no confirmed address needs its own visible status.</li>
+      <li><b>At-risk &amp; win-back</b> &mdash; <i>settled.</i> Klaviyo fires the win-back on two missed pack emails. The app must receive the at-risk flag from Klaviyo and create the Poppy-card task at the end of the sequence.</li>
+      <li><b>Win-back execution</b> &mdash; the email sequence and the Poppy-card trigger both need to be built.</li>
+      <li><b>Tier mismatch flag</b> &mdash; a tier change that leaves an active match cross-tier must flag the pair.</li>
+      <li><b>Orphaned partner</b> &mdash; every dissolved match must route the remaining child through the shared re-queue path.</li>
+      <li><b>Data deletion</b> &mdash; COPPA-compliant hard delete including match history; admin-only and logged.</li>
+    </ol>
+  </div>
+
+  <footer>
+    MailDay Matching &mdash; Member Lifecycle Map &middot; Team onboarding reference, May 2026<br>
+    <span class="tag">No wifi required.</span>
+  </footer>
+
+</div>
+
+<!-- ===================== DRAWER ===================== -->
+<div class="scrim" id="scrim" onclick="closeDrawer()"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="dTitle">
+  <div class="drawer-top">
+    <p class="drawer-kicker" id="dKicker">Step</p>
+    <p class="drawer-title" id="dTitle">&nbsp;</p>
+    <button class="drawer-close" onclick="closeDrawer()" aria-label="Close">&times;</button>
+  </div>
+  <div class="drawer-body" id="dBody"></div>
+</aside>
+
+<script>
+var STEPS = {
+  subscribe: {
+    kicker:"Spine \u00b7 Step 1", color:"#5F5E5A",
+    what:"A parent buys a MailDay membership on the Shopify store \u2014 Core, Minis, or a Homeschool tier. This is the very first moment a family exists to us.",
+    who:"auto", whoText:"Automatic \u2014 a Shopify webhook fires the instant the order is placed and creates the parent and child records in the Matching app. Nobody touches anything.",
+    next:"The parent immediately receives the Welcome email and is sent to the onboarding form.",
+    tmpl:{ flag:"draft", subject:"You're in. Your pen pal is coming.", from:"Courtney | MailDay",
+      body:"Welcome to MailDay!\n\nYou just did something kind of countercultural \u2014 you signed your kid up to write actual letters to an actual friend. No screen. No feed. Just a mailbox.\n\nHere's what happens next:\n\n1. Fill out the quick onboarding form (link below) so we can get to know your child.\n2. We'll match them with a pen pal within 5\u20137 days \u2014 Minis within 48 hours.\n3. Their first themed pack lands soon after.\n\nOne thing we need from you first: the onboarding form. We can't match your child until it's done, so do it now while you're thinking about it \u2014 it takes about three minutes.\n\n\u2192 [Onboarding form link]\n\nNo wifi required,\nCourtney" }
+  },
+  onboard: {
+    kicker:"Spine \u00b7 Step 2", color:"#185FA5",
+    what:"The parent fills out the onboarding form \u2014 the child's name, date of birth, and interests. This is what the matching system uses to find a good pen pal. The form lives inside the MailDay Matching app.",
+    who:"auto", whoText:"Automatic \u2014 completing the form creates the child profile and starts the 21-day guarantee clock at day 0. The child appears in the Unmatched Queue right away.",
+    next:"The child enters the Unmatched Queue and waits for the next match session.",
+    note:"Note for the team: age should be calculated from date of birth, never stored as a fixed number \u2014 otherwise a child never ages out of Minis. This is on the open-gaps list to confirm with the developer."
+  },
+  incomplete: {
+    kicker:"Spine \u00b7 Branch \u2014 open gap", color:"#BA7517",
+    what:"A family has paid but never finished the onboarding form. They are a paying customer with no child in the queue \u2014 invisible unless we catch them. This is one of the easiest ways to lose a member before they ever start.",
+    who:"manual", whoText:"Manual \u2014 the team reaches out. Long term this should be a nudge sequence plus an Action Item once a family has been incomplete for a few days.",
+    next:"Once the form is completed, the child enters the Unmatched Queue and the journey continues normally.",
+    tmpl:{ flag:"draft", subject:"Your MailDay pen pal is waiting on one thing", from:"Courtney | MailDay",
+      body:"Hi! \u2014 quick one.\n\nYour MailDay membership is all set, but we noticed the onboarding form isn't finished yet \u2014 and we can't match your child with a pen pal until it is.\n\nIt's three minutes, promise. Just your child's name, birthday, and a few things they love.\n\n\u2192 [Onboarding form link]\n\nThe sooner it's in, the sooner there's a letter on the way.\n\nNo wifi required,\nCourtney" },
+    gap:"OPEN GAP: confirm with the developer that an incomplete-onboarding family is nudged automatically and then surfaces in Action Items \u2014 it must not sit invisible."
+  },
+  queue: {
+    kicker:"Spine \u00b7 Step 3", color:"#185FA5",
+    what:"The child is now in the Unmatched Queue, waiting for a pen pal. The queue is split by tier \u2014 Core kids match with Core, Minis with Minis, never across.",
+    who:"auto", whoText:"Automatic \u2014 the child sits in the queue, sorted by how long they've waited. The 21-day guarantee clock is running.",
+    next:"At the next match session the child is paired. If they pass day 21 first, they enter the Guarantee Breach path."
+  },
+  guarantee: {
+    kicker:"Spine \u00b7 Branch \u2014 the 21-day guarantee", color:"#A32D2D",
+    what:"Every child is guaranteed a match within 21 days of joining the queue. If we miss that, we pause their billing until they're matched \u2014 they should never pay for a service they haven't received. At day 18\u201320 the card turns amber (prioritize); at day 21+ it turns red.",
+    who:"manual", whoText:"Manual \u2014 the app auto-sets the billing-paused flag at day 21, but a person must contact the family, pause billing in ReCharge, and mark it confirmed on the queue card for the audit trail.",
+    next:"The child is prioritized in the next match session. On match approval, billing auto-resumes (with a confirmation dialog first).",
+    tmpl:{ flag:"draft", subject:"An update on your child's pen pal match", from:"Courtney | MailDay",
+      body:"Hi \u2014 I wanted to reach out personally.\n\nWe promise every child a pen pal within 21 days, and we haven't found the right match for your child yet. I'm sorry about that \u2014 a good match matters more to us than a fast one, and we'd rather get it right.\n\nHere's what we're doing: I've paused your billing, so you won't be charged again until your child is actually matched. Nothing for you to do.\n\nYour child is now top priority in our next matching round. I expect to have news for you very soon.\n\nThank you for your patience \u2014 it means a lot.\n\nNo wifi required,\nCourtney" }
+  },
+  match: {
+    kicker:"Spine \u00b7 Step 4", color:"#534AB7",
+    what:"In a match session, the AI reads every waiting child's profile \u2014 age, interests, tier \u2014 and proposes compatible pairs. A human reviews each pair and approves or rejects it. The AI suggests; a person always decides.",
+    who:"manual", whoText:"Manual \u2014 an admin runs the session and approves every match. No match is ever made without human approval.",
+    next:"On approval, both children move toward Active Match. Match notification letters go out and addresses must be confirmed."
+  },
+  address: {
+    kicker:"Spine \u00b7 Step 5 \u2014 open gap", color:"#BA7517",
+    what:"The match is made and both families get their notification email \u2014 the most exciting email in the whole sequence, sent as Poppy, with the pen pal's name, fun facts, the first pack, and the mailing address. Before the match is truly live, both mailing addresses must be confirmed.",
+    who:"manual", whoText:"Manual \u2014 the team sends the notifications and confirms both addresses. A wrong address means a child's letter goes to a stranger \u2014 this is a safety step, not a clerical one.",
+    next:"Once both addresses are confirmed, the match becomes Active.",
+    tmpl:{ flag:"draft", subject:"Meet [pen pal first name]. Your first pack is inside.", from:"Poppy at MailDay",
+      body:"Big news \u2014 [child's name] has a pen pal!\n\nTheir name is [pen pal first name], they're [age], and here are three things about them: [fun fact], [fun fact], [fun fact].\n\n[Pen pal first name]'s family got an email today too \u2014 with [child's name]'s name and fun facts \u2014 so there's a kid on the other end already excited to hear from yours.\n\nYour first pack is here: \u2192 [pack link]\n\nThe mission this week: write your first letter. Don't overthink it \u2014 the pack has a prompt card if anyone gets stuck.\n\nMailing address for [pen pal first name]:\n[Parent name]\n[Full street address]\n\nAnd don't forget your stamp. (We will remind you every single time.)\n\nYours by post,\nPoppy",
+      note:"Drawn from the handbook's Email 2 spec. Confirm final fun-fact formatting and pack-link handling." }
+  },
+  active: {
+    kicker:"Healthy resting state", color:"#3B6D11",
+    what:"The match is live. Two kids are writing letters back and forth, and a new themed pack lands on the 1st of every month. This is where a healthy member spends most of their time \u2014 the goal state.",
+    who:"auto", whoText:"Automatic \u2014 monthly pack delivery emails send on the 1st. Day-14 first-letter nudges fire for families who haven't written yet.",
+    next:"From here a member can stay active indefinitely \u2014 or fall into one of five branches. Open view 2."
+  },
+  fork: {
+    kicker:"Spine \u2192 Branches", color:"#5F5E5A",
+    what:"This isn't a step \u2014 it's the hand-off point. An active member can continue happily, or life happens and they fall into one of five branches: rematch, ghosting, tier change, voluntary pause, or cancellation.",
+    who:"auto", whoText:"\u2014",
+    next:"Open view 2, The Branches, to follow each path."
+  },
+  rematch: {
+    kicker:"Branch 1 \u00b7 Rematch", color:"#534AB7",
+    what:"A parent tells us the pen pal match isn't working \u2014 the kids didn't click, or the other side stopped writing. They want a new pen pal. This is a save, not a loss: the family is still engaged and still wants MailDay.",
+    who:"manual", whoText:"Manual \u2014 Courtney reviews and approves every rematch request; the team processes it. Rematches are higher priority than brand-new matches because the family is already waiting.",
+    next:"The match is closed and the child re-enters matching as a priority. See 'Match closed' next."
+  },
+  "rematch-closed": {
+    kicker:"Branch 1 \u00b7 Rematch", color:"#534AB7",
+    what:"The old match is formally closed. The reason is logged so we can spot patterns, and the child is queued as a priority for the next batch.",
+    who:"manual", whoText:"Manual \u2014 the team closes the match record and logs the rematch reason.",
+    next:"The child's old pen pal becomes an orphaned partner, and this child routes into the Shared re-queue path."
+  },
+  ghosting: {
+    kicker:"Branch 2 \u00b7 Ghosting", color:"#BA7517",
+    what:"A matched family goes quiet. We don't worry about a missed newsletter \u2014 the signal that matters is the monthly pack email, because the pack IS the product. Ghosting is defined precisely: a family who has not opened TWO consecutive monthly pack emails. Packs send on the 1st, so two missed packs is roughly a 45-day window.",
+    who:"auto", whoText:"Automatic \u2014 Klaviyo tracks pack-email opens. When a member has been sent two consecutive pack emails and opened neither (\u224845 days), Klaviyo flips them to at-risk and starts the win-back flow on its own.",
+    next:"The at-risk status surfaces in the app as a flag, and Klaviyo automatically begins the win-back email sequence."
+  },
+  atrisk: {
+    kicker:"Branch 2 \u00b7 Ghosting", color:"#BA7517",
+    what:"The family has missed two consecutive monthly pack emails and is now flagged at-risk. Two things happen at once: Klaviyo starts the win-back email sequence automatically, and the app shows the family as at-risk so the team has visibility.",
+    who:"auto", whoText:"Automatic \u2014 no manual step here. Klaviyo both triggers the win-back sequence and pushes the at-risk status to the app. The flag is for the team's awareness; nobody has to act on it for the sequence to run.",
+    next:"The win-back email sequence runs. If it ends with the family still disengaged, a task is created for the Poppy card."
+  },
+  winback: {
+    kicker:"Branch 2 \u00b7 Ghosting", color:"#BA7517",
+    what:"The re-engagement effort, in two stages. Stage 1: an automated Klaviyo email sequence, triggered the moment a family hits the two-missed-packs threshold. Stage 2: if the sequence ends and the family is still disengaged, one physical Poppy card, handwritten and mailed by Courtney. The card reaches a family a screen can't.",
+    who:"manual", whoText:"The email sequence is fully automatic in Klaviyo. The one manual step in the whole branch: at the end of the sequence, the app creates a task \u2014 'send Poppy card to [family]' \u2014 Courtney mails the card and marks it done.",
+    next:"If the family re-engages at any point, the flow exits and they return to Active Match. If the card goes unanswered too, into the Shared offboarding path.",
+    tmpl:{ flag:"draft", subject:"[Poppy card \u2014 physical mail, handwritten by Courtney]", from:"Poppy at MailDay",
+      body:"Dear friend,\n\nI haven't heard from your mailbox in a while, and I started to wonder if you'd gone on an adventure without me.\n\nYour pen pal is still here. So is your next pack. And so am I \u2014 scarf, satchel, and a stack of stamps, ready whenever you are.\n\nNo rush. The mailbox doesn't mind waiting. But it does miss you.\n\nYours by post,\nPoppy",
+      note:"This is the physical card Courtney mails by hand \u2014 short, warm, Poppy's voice. The automated email sequence that runs BEFORE it is separate and lives in Klaviyo \u2014 build that sequence copy there." }
+  },
+  winfail: {
+    kicker:"Branch 2 \u00b7 Ghosting", color:"#BA7517",
+    what:"The email sequence and the Poppy card both went unanswered. At this point the family is treated as churned.",
+    who:"manual", whoText:"Manual \u2014 the team moves the family into the offboarding path.",
+    next:"Routes into the Shared offboarding path."
+  },
+  reengaged: {
+    kicker:"Healthy resting state", color:"#3B6D11",
+    what:"The win-back worked. The family is opening email again, the kids are writing. They return to a normal Active Match.",
+    who:"auto", whoText:"\u2014",
+    next:"Back to Active Match \u2014 the healthy state."
+  },
+  tier: {
+    kicker:"Branch 3 \u00b7 Tier change", color:"#185FA5",
+    what:"A tier change is triggered one of two ways: a parent switches tier in Shopify (Core to Minis, into a Homeschool tier), or a matched Minis child ages past 6 into Core range. Tier isn't a preference \u2014 it's an age band, and kids cross it as they grow.",
+    who:"auto", whoText:"Automatic \u2014 a Shopify switch updates the record via webhook. Aging out depends on age being derived from date of birth.",
+    next:"If the child has an active match that's now cross-tier, that pair gets flagged. See 'Mismatch flagged'."
+  },
+  mismatch: {
+    kicker:"Branch 3 \u00b7 Tier change \u2014 open gap", color:"#185FA5",
+    what:"A child's tier changed while they were in an active match, so the pair is now cross-tier \u2014 a Core child matched to a Mini, for example. That match is no longer valid and shouldn't sit there silently.",
+    who:"manual", whoText:"Manual \u2014 a person reviews the flagged pair and decides whether to dissolve the match.",
+    next:"If dissolved, both children route into the Shared re-queue path.",
+    gap:"OPEN GAP: confirm with the developer that a tier change on an already-matched child flags the now-invalid pair for review."
+  },
+  pause: {
+    kicker:"Branch 4 \u00b7 Voluntary pause", color:"#5F5E5A",
+    what:"A parent pauses their own membership in ReCharge \u2014 a vacation, a tight month, a busy season. This is completely different from a guarantee pause: the family chose it, and they fully intend to come back.",
+    who:"auto", whoText:"Automatic \u2014 a ReCharge webhook updates the billing-paused flag. The key is that the app should know this is a voluntary pause, not a guarantee breach.",
+    next:"The child's match is simply held until billing resumes. See 'Match held'.",
+    gap:"WORTH CONFIRMING: the app should distinguish a voluntary pause from a guarantee pause \u2014 they use the same flag but are very different situations, and a vacationing family should never get 'sorry we couldn't match you' messaging."
+  },
+  held: {
+    kicker:"Branch 4 \u00b7 Voluntary pause \u2014 healthy", color:"#3B6D11",
+    what:"While the family is paused, their match is held \u2014 not dissolved. The pen pal relationship waits for them. This is not a guarantee case and the child does not go back into the queue.",
+    who:"auto", whoText:"Automatic \u2014 the match stays intact; packs simply don't ship while paused.",
+    next:"When the parent resumes billing in ReCharge, the family returns to Active Match."
+  },
+  cancel: {
+    kicker:"Branch 5 \u00b7 Cancellation", color:"#A32D2D",
+    what:"A parent moves to end their membership. Before anything is final, the cancellation pause offer fires \u2014 our best chance to keep the family with a 1\u20133 month pause instead of a full goodbye.",
+    who:"manual", whoText:"Manual \u2014 Courtney always handles cancellation conversations personally, especially for members active 6+ months. The VA flags; Courtney responds.",
+    next:"If the pause offer works, the family pauses. If not, two things happen: the partner is orphaned, and the family enters the Shared offboarding path."
+  },
+  pauseoffer: {
+    kicker:"Branch 5 \u00b7 Cancellation", color:"#BA7517",
+    what:"Before cancellation completes, the family is offered a pause of 1\u20133 months instead. Life gets busy \u2014 a pause keeps the relationship alive in a way a cancellation doesn't. This is the retention save.",
+    who:"auto", whoText:"Automatic trigger (fires when cancellation is initiated in ReCharge) \u2014 but a personal follow-up from Courtney lands far better than the automated version alone.",
+    next:"If accepted, the family pauses. If declined, the cancellation proceeds.",
+    tmpl:{ flag:"draft", subject:"Before you go \u2014 would a pause help?", from:"Courtney | MailDay",
+      body:"Hi \u2014 I saw you started to cancel, and I completely understand. Life gets full.\n\nBefore you go, one option: instead of cancelling, you can pause your membership for 1, 2, or 3 months. Your child keeps their pen pal, nothing gets lost, and billing simply stops until you're ready.\n\nA lot of families pause for a busy season and come right back. The door stays open either way.\n\n\u2192 [Pause my membership]\n\u2192 [No thanks, continue cancelling]\n\nWhatever you choose \u2014 thank you for giving your kid this. It mattered.\n\nNo wifi required,\nCourtney" }
+  },
+  orphan: {
+    kicker:"Convergence point \u2014 open gap", color:"#A32D2D",
+    what:"This is the box new team members miss most. Whenever a match dissolves \u2014 for a rematch, a tier mismatch, or because one family cancelled \u2014 there is a child on the OTHER side who did nothing wrong and has just lost their pen pal. That child must be looked after.",
+    who:"manual", whoText:"Manual \u2014 the team makes sure the remaining child re-enters the queue, and the family is told their pen pal moved on, kindly.",
+    next:"The orphaned child routes into the Shared re-queue path.",
+    gap:"OPEN GAP: confirm with the developer that every dissolved match \u2014 from any cause \u2014 automatically returns the remaining child to the queue. The partner must never be left silently matched to someone who is gone."
+  },
+  requeue: {
+    kicker:"Convergence point \u2014 the shared path", color:"#534AB7",
+    what:"Three different branches \u2014 rematch, tier mismatch, and the orphaned partner of a cancellation \u2014 all funnel into this one path. The child's status is set back to unmatched and the 21-day guarantee clock RESETS to day 0. They get a fresh, full guarantee.",
+    who:"auto", whoText:"Should be automatic \u2014 one re-queue routine, used by every branch. The developer builds it once, not three times.",
+    next:"The child re-enters the Unmatched Queue and goes through matching again \u2014 back to view 1."
+  },
+  offboard: {
+    kicker:"Convergence point \u2014 the shared path", color:"#5F5E5A",
+    what:"Both exits \u2014 a failed win-back and a completed cancellation \u2014 funnel into this one path. The cancellation is logged with a reason code (so we can learn from it), the child's status is set to cancelled, and a win-back email is scheduled for day 30.",
+    who:"manual", whoText:"Manual \u2014 the team logs the cancellation and reason code. The day-30 win-back email is automatic.",
+    next:"The family is offboarded. They may return via the day-30 win-back. A data-deletion request, if made, is handled next.",
+    tmpl:{ flag:"draft", subject:"We saved your spot", from:"Courtney | MailDay",
+      body:"Hi \u2014 it's been about a month since your MailDay membership ended, and I wanted to check in.\n\nNo pitch, really. Just this: if the timing is better now, your child can pick a pen pal back up right where they left off. The packs have kept coming \u2014 there's a lot of new adventures waiting.\n\n\u2192 [Reactivate membership]\n\nAnd if not, that's okay too. Thank you for the letters your family sent into the world.\n\nNo wifi required,\nCourtney" }
+  },
+  deletion: {
+    kicker:"Offboarding \u00b7 Compliance \u2014 open gap", color:"#BA7517",
+    what:"A parent has the legal right under COPPA to request that their child's data be fully deleted. Because MailDay holds children's names, ages, and home addresses, this is not optional \u2014 and 'delete' means actually removing the data, including from match history, not just flipping a status.",
+    who:"manual", whoText:"Manual \u2014 admin-only. Every deletion must be logged.",
+    next:"The family's data is removed. This is the final possible step in the lifecycle.",
+    gap:"OPEN GAP: confirm with the developer that a true COPPA-compliant hard delete exists \u2014 admin-only, logged, and reaching match history."
+  }
+};
+
+var drawer = document.getElementById('drawer');
+var scrim = document.getElementById('scrim');
+
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function openDrawer(key){
+  var s = STEPS[key];
+  if(!s) return;
+  document.getElementById('dKicker').textContent = s.kicker;
+  document.getElementById('dKicker').style.color = s.color;
+  document.getElementById('dTitle').innerHTML = document.querySelector('[data-step="'+key+'"] text').textContent;
+  var h = '';
+  h += '<div class="field"><p class="field-label">What this step is</p><p class="field-val">'+esc(s.what)+'</p></div>';
+  if(s.who !== '\u2014'){
+    var tag = s.who === 'auto' ? 'auto-tag' : 'manual-tag';
+    var lbl = s.who === 'auto' ? 'Automatic' : 'Manual';
+    h += '<div class="field"><p class="field-label">Who does it</p>';
+    h += '<span class="field-val who '+tag+'">'+lbl+'</span>';
+    h += '<p class="field-val" style="margin-top:7px">'+esc(s.whoText)+'</p></div>';
+  }
+  h += '<div class="field"><p class="field-label">What happens next</p><p class="field-val">'+esc(s.next)+'</p></div>';
+  if(s.gap){
+    h += '<div class="field"><p class="field-label">Flag for the developer</p><div class="gap-note">'+esc(s.gap)+'</div></div>';
+  }
+  if(s.tmpl){
+    var t = s.tmpl;
+    var fl = t.flag === 'tbd' ? '<span class="tmpl-flag tbd">Template TBD &mdash; Courtney</span>' : '<span class="tmpl-flag">Draft &mdash; Courtney to approve</span>';
+    h += '<div class="field"><p class="field-label">What to send</p><div class="tmpl">'+fl;
+    if(t.subject) h += '<p class="tmpl-subj"><b>Subject:</b> '+esc(t.subject)+'</p>';
+    if(t.from) h += '<p class="tmpl-subj"><b>From:</b> '+esc(t.from)+'</p>';
+    h += '<p class="tmpl-body">'+esc(t.body)+'</p>';
+    if(t.note) h += '<div class="gap-note" style="margin-top:10px">'+esc(t.note)+'</div>';
+    h += '</div></div>';
+  }
+  document.getElementById('dBody').innerHTML = h;
+  document.getElementById('dBody').scrollTop = 0;
+  drawer.classList.add('on');
+  scrim.classList.add('on');
+}
+function closeDrawer(){
+  drawer.classList.remove('on');
+  scrim.classList.remove('on');
+}
+function showView(i, btn){
+  var views = document.querySelectorAll('.view');
+  var tabs = document.querySelectorAll('.tab');
+  for(var n=0;n<views.length;n++){ views[n].classList.toggle('on', n===i); }
+  for(var t=0;t<tabs.length;t++){ tabs[t].classList.remove('on'); }
+  btn.classList.add('on');
+  closeDrawer();
+}
+document.addEventListener('click', function(e){
+  var g = e.target.closest('.clk');
+  if(g){ openDrawer(g.getAttribute('data-step')); }
+});
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape'){ closeDrawer(); }
+  if((e.key === 'Enter' || e.key === ' ') && document.activeElement && document.activeElement.classList.contains('clk')){
+    e.preventDefault();
+    openDrawer(document.activeElement.getAttribute('data-step'));
+  }
+});
+</script>
+</body>
+</html>

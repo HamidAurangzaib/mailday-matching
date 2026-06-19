@@ -1,0 +1,83 @@
+Here's the full corrected prompt:
+
+---
+
+Build me an internal admin web app called MailDay Matching. This is a pen pal matching tool for a children's membership business. Here is everything you need to know before you write a single line of code.
+
+**The purpose of this app:**
+An admin (me or a VA) logs in on Friday, sees all unmatched children, runs AI-powered match suggestions, approves or rejects each suggestion, and confirms matches. Confirmed matches write to the database and trigger external email notifications. That is the entire job of this app.
+
+**The database:**
+Use Supabase as the database. Create the following tables:
+
+Parents table: id, first_name, last_name, email, phone, state, mailing_address, address_type, shopify_customer_id, recharge_subscription_id, membership_tier, billing_type, subscription_status, join_date, referral_source, community_status, give_a_key_recipient, last_email_open_date, at_risk (boolean), internal_notes
+
+Children table: id, parent_id (foreign key to Parents), child_first_name, age, tier (Core / Minis / Homeschool Core / Homeschool Minis), interests (array — multiselect), homeschool_edition (boolean), homeschool_tier, homeschool_approach, match_status (Unmatched / Matched / Rematch Requested / Rematched / Paused / Cancelled), rematch_count, match_guarantee_start_date, billing_paused (boolean), safety_flag (boolean), internal_notes, created_date
+
+Matches table: id, child_a_id (foreign key to Children), child_b_id (foreign key to Children), match_date, match_status (Active / Closed), shared_interests (array), match_notification_sent_a (boolean), match_notification_sent_b (boolean), close_reason, created_date
+
+**The interest options (fixed picklist — do not allow free text):**
+Soccer, Reading, Drawing, Music, Science, Animals, Dance, Basketball, Video Games, Math, Robotics, Cooking, Baking, Crafts, Swimming, Puzzles, Board Games, Photography, Travel, Dinosaurs, Painting, Hiking, Gardening, Pets, Nature, Lego, Theater, Writing
+
+**The matching rules Claude must follow:**
+- Match within age band only — Core and Homeschool Core match together (ages 6-12), Minis and Homeschool Minis match together (ages 3-6). Homeschool vs. non-homeschool does not affect matching eligibility.
+- Age proximity: ideally within 1 year, acceptable within 2 years, never more than 2 years apart.
+- Maximize shared interests — the more overlap the better.
+- Geographic diversity is a soft preference — different states is better than same state but never a hard rule.
+- Never match a child with someone they have previously been matched with.
+
+**The matching flow:**
+1. Admin opens the app and sees the Unmatched Queue — all children with match_status = Unmatched, grouped by age band — Minis pool (Minis + Homeschool Minis ages 3-6) and Core pool (Core + Homeschool Core ages 6-12)
+2. Admin clicks Run Matching
+3. App sends all unmatched children to the Claude API with a prompt that applies the matching rules above and returns ranked match suggestions with reasoning for each suggestion
+4. Admin sees each suggested match: both children's names, ages, tiers, states, shared interests, and Claude's reasoning
+5. Admin clicks Approve or Reject for each suggestion
+6. Approved matches: create a record in the Matches table, update both children's match_status to Matched, populate shared_interests on the match record
+7. Rejected matches: child stays in the Unmatched queue for next Friday
+8. After all approvals: app displays a summary of matches confirmed this session
+
+**The 21-day match guarantee:**
+- When a child record is created, match_guarantee_start_date is set to today
+- When a rematch is requested, match_guarantee_start_date resets to today
+- The app checks daily: any child with match_status = Unmatched where match_guarantee_start_date is 18 days ago → show a yellow warning badge in the Unmatched Queue
+- Any child with match_status = Unmatched where match_guarantee_start_date is 21 days ago → show a red urgent badge, set billing_paused = true on the child record, trigger a Klaviyo email to the parent (via webhook — I will provide the webhook URL later), and fire an urgent alert inside the app
+- When a match is confirmed for a child with billing_paused = true → set billing_paused = false and trigger a billing resume webhook to ReCharge (I will provide the webhook URL later)
+
+**The three views the admin needs:**
+1. Unmatched Queue — all unmatched children grouped by age band, with guarantee countdown badges, sortable by days waiting
+2. Match Session — the Friday matching screen where Claude suggestions appear and admin approves or rejects
+3. Match History — all confirmed matches, searchable by child name, filterable by age band and date range
+
+**The fail states to handle:**
+- Parent record exists but no child record → show in a separate Incomplete Onboarding view with days since purchase
+- No suitable match exists for a child after Claude runs → flag the child in the queue as No Match Found, keep in queue, guarantee clock continues
+- Admin rejects all Claude suggestions for a child → child stays in queue, no change to record
+- Match closes → both children's match_status updates to Unmatched or Rematch Requested depending on close reason selected by admin, guarantee clock resets for Rematch Requested
+
+**Authentication:**
+Simple email and password login. Two roles: Admin (full access) and VA (can see Unmatched Queue and run matching but cannot see mailing addresses, safety flags, or internal notes).
+
+**The Claude API integration:**
+Use the Anthropic Claude API for matching suggestions. The prompt should instruct Claude to return suggestions in JSON format: array of match objects each containing child_a_id, child_b_id, shared_interests array, confidence score 1-10, and reasoning string. Parse the JSON and render each suggestion as a card in the Match Session view.
+
+**Design:**
+Clean, functional, admin-style UI. Use these brand colors: primary red #DD4B39, yellow accent #FFD23F, cream background #FFF5E6, sky blue #4AADDE, ink black #1A1A1A. Cooper Bold for headings if available, otherwise a clean bold sans-serif. This is an internal tool — prioritize clarity and speed over decoration.
+
+**Do not build yet:**
+- Public-facing pages
+- Parent-facing portal
+- Shopify or ReCharge integrations (placeholders only — I will connect later)
+- Klaviyo integration (webhook placeholder only)
+
+**Build in this order:**
+1. Supabase schema and connection
+2. Authentication (admin and VA roles)
+3. Unmatched Queue view
+4. Match Session view with Claude API integration
+5. Approve / reject flow writing to Supabase
+6. 21-day guarantee logic and badges
+7. Match History view
+8. Incomplete Onboarding view
+9. Fail state handling throughout
+
+Start with the Supabase schema. Show me the full schema before writing any frontend code and ask me to confirm before continuing.

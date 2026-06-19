@@ -1,0 +1,875 @@
+openapi: 3.1.0
+info:
+  title: Api
+  version: 0.1.0
+  description: MailDay Matching API
+servers:
+  - url: /api
+tags:
+  - name: health
+    description: Health operations
+  - name: auth
+    description: Authentication
+  - name: children
+    description: Child records and unmatched queue
+  - name: parents
+    description: Parent records
+  - name: matching
+    description: AI-powered match suggestions
+  - name: matches
+    description: Match records and history
+  - name: stats
+    description: Dashboard statistics
+
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout current session
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current user info
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /children/unmatched:
+    get:
+      operationId: getUnmatchedChildren
+      tags: [children]
+      summary: Get all unmatched children grouped by age band with guarantee status
+      responses:
+        "200":
+          description: Unmatched children with guarantee info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnmatchedQueue"
+
+  /children/incomplete-onboarding:
+    get:
+      operationId: getIncompleteOnboarding
+      tags: [children]
+      summary: Parents who have no child records (incomplete onboarding)
+      responses:
+        "200":
+          description: Parents with incomplete onboarding
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/IncompleteParent"
+
+  /children:
+    get:
+      operationId: listChildren
+      tags: [children]
+      summary: List all children
+      parameters:
+        - name: match_status
+          in: query
+          schema:
+            type: string
+        - name: tier
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Children list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChildWithParent"
+    post:
+      operationId: createChild
+      tags: [children]
+      summary: Create a new child record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChildInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Child"
+
+  /children/{id}:
+    get:
+      operationId: getChild
+      tags: [children]
+      summary: Get a single child
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Child record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChildWithParent"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateChild
+      tags: [children]
+      summary: Update a child record
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChildUpdate"
+      responses:
+        "200":
+          description: Updated child
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Child"
+
+  /parents:
+    get:
+      operationId: listParents
+      tags: [parents]
+      summary: List all parents
+      responses:
+        "200":
+          description: Parents list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Parent"
+    post:
+      operationId: createParent
+      tags: [parents]
+      summary: Create a parent record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ParentInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Parent"
+
+  /parents/{id}:
+    get:
+      operationId: getParent
+      tags: [parents]
+      summary: Get a single parent with their children
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Parent with children
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParentWithChildren"
+    patch:
+      operationId: updateParent
+      tags: [parents]
+      summary: Update a parent record
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ParentUpdate"
+      responses:
+        "200":
+          description: Updated parent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Parent"
+
+  /matching/run:
+    post:
+      operationId: runMatching
+      tags: [matching]
+      summary: Run Claude AI matching on all unmatched children
+      responses:
+        "200":
+          description: Match suggestions from Claude
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchSession"
+
+  /matches:
+    get:
+      operationId: listMatches
+      tags: [matches]
+      summary: Get match history
+      parameters:
+        - name: age_band
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: date_from
+          in: query
+          schema:
+            type: string
+        - name: date_to
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Match history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MatchWithChildren"
+    post:
+      operationId: approveMatch
+      tags: [matches]
+      summary: Approve a match suggestion (creates match record)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MatchApproval"
+      responses:
+        "201":
+          description: Match approved and created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Match"
+
+  /matches/{id}:
+    get:
+      operationId: getMatch
+      tags: [matches]
+      summary: Get a single match
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Match record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchWithChildren"
+    patch:
+      operationId: updateMatch
+      tags: [matches]
+      summary: Update a match (e.g., close it)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MatchUpdate"
+      responses:
+        "200":
+          description: Updated match
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Match"
+
+  /stats/summary:
+    get:
+      operationId: getStatsSummary
+      tags: [stats]
+      summary: Get dashboard summary statistics
+      responses:
+        "200":
+          description: Summary statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatsSummary"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    SuccessResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+
+    LoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+
+    AuthResponse:
+      type: object
+      required: [token, user]
+      properties:
+        token:
+          type: string
+        user:
+          $ref: "#/components/schemas/User"
+
+    User:
+      type: object
+      required: [id, email, role]
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          description: admin or va
+
+    Parent:
+      type: object
+      required: [id, first_name, last_name, email]
+      properties:
+        id:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: ["string", "null"]
+        state:
+          type: ["string", "null"]
+        mailing_address:
+          type: ["string", "null"]
+        address_type:
+          type: ["string", "null"]
+        shopify_customer_id:
+          type: ["string", "null"]
+        recharge_subscription_id:
+          type: ["string", "null"]
+        membership_tier:
+          type: ["string", "null"]
+        billing_type:
+          type: ["string", "null"]
+        subscription_status:
+          type: ["string", "null"]
+        join_date:
+          type: ["string", "null"]
+        referral_source:
+          type: ["string", "null"]
+        community_status:
+          type: ["string", "null"]
+        give_a_key_recipient:
+          type: ["boolean", "null"]
+        last_email_open_date:
+          type: ["string", "null"]
+        at_risk:
+          type: ["boolean", "null"]
+        internal_notes:
+          type: ["string", "null"]
+        created_at:
+          type: string
+
+    ParentInput:
+      type: object
+      required: [first_name, last_name, email]
+      properties:
+        first_name:
+          type: string
+        last_name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        state:
+          type: string
+        mailing_address:
+          type: string
+        address_type:
+          type: string
+        membership_tier:
+          type: string
+        billing_type:
+          type: string
+        subscription_status:
+          type: string
+        join_date:
+          type: string
+        referral_source:
+          type: string
+        community_status:
+          type: string
+        give_a_key_recipient:
+          type: boolean
+        at_risk:
+          type: boolean
+        internal_notes:
+          type: string
+
+    ParentUpdate:
+      type: object
+      properties:
+        first_name:
+          type: string
+        last_name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        state:
+          type: string
+        mailing_address:
+          type: string
+        address_type:
+          type: string
+        membership_tier:
+          type: string
+        billing_type:
+          type: string
+        subscription_status:
+          type: string
+        join_date:
+          type: string
+        community_status:
+          type: string
+        give_a_key_recipient:
+          type: boolean
+        last_email_open_date:
+          type: string
+        at_risk:
+          type: boolean
+        internal_notes:
+          type: string
+
+    ParentWithChildren:
+      allOf:
+        - $ref: "#/components/schemas/Parent"
+        - type: object
+          properties:
+            children:
+              type: array
+              items:
+                $ref: "#/components/schemas/Child"
+
+    Child:
+      type: object
+      required: [id, parent_id, child_first_name, age, tier, match_status]
+      properties:
+        id:
+          type: string
+        parent_id:
+          type: string
+        child_first_name:
+          type: string
+        age:
+          type: integer
+        tier:
+          type: string
+          description: Core / Minis / Homeschool Core / Homeschool Minis
+        interests:
+          type: array
+          items:
+            type: string
+        homeschool_edition:
+          type: ["boolean", "null"]
+        homeschool_tier:
+          type: ["string", "null"]
+        homeschool_approach:
+          type: ["string", "null"]
+        match_status:
+          type: string
+          description: Unmatched / Matched / Rematch Requested / Rematched / Paused / Cancelled
+        rematch_count:
+          type: ["integer", "null"]
+        match_guarantee_start_date:
+          type: ["string", "null"]
+        billing_paused:
+          type: ["boolean", "null"]
+        safety_flag:
+          type: ["boolean", "null"]
+        internal_notes:
+          type: ["string", "null"]
+        created_date:
+          type: ["string", "null"]
+        created_at:
+          type: string
+
+    ChildInput:
+      type: object
+      required: [parent_id, child_first_name, age, tier]
+      properties:
+        parent_id:
+          type: string
+        child_first_name:
+          type: string
+        age:
+          type: integer
+        tier:
+          type: string
+        interests:
+          type: array
+          items:
+            type: string
+        homeschool_edition:
+          type: boolean
+        homeschool_tier:
+          type: string
+        homeschool_approach:
+          type: string
+        safety_flag:
+          type: boolean
+        internal_notes:
+          type: string
+
+    ChildUpdate:
+      type: object
+      properties:
+        child_first_name:
+          type: string
+        age:
+          type: integer
+        tier:
+          type: string
+        interests:
+          type: array
+          items:
+            type: string
+        homeschool_edition:
+          type: boolean
+        homeschool_tier:
+          type: string
+        homeschool_approach:
+          type: string
+        match_status:
+          type: string
+        rematch_count:
+          type: integer
+        match_guarantee_start_date:
+          type: string
+        billing_paused:
+          type: boolean
+        safety_flag:
+          type: boolean
+        internal_notes:
+          type: string
+
+    ChildWithParent:
+      allOf:
+        - $ref: "#/components/schemas/Child"
+        - type: object
+          required: [parent]
+          properties:
+            parent:
+              $ref: "#/components/schemas/Parent"
+            days_waiting:
+              type: ["integer", "null"]
+            guarantee_status:
+              type: ["string", "null"]
+              description: ok / warning / urgent
+
+    IncompleteParent:
+      type: object
+      required: [id, first_name, last_name, email, created_at]
+      properties:
+        id:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+        email:
+          type: string
+        state:
+          type: ["string", "null"]
+        membership_tier:
+          type: ["string", "null"]
+        subscription_status:
+          type: ["string", "null"]
+        join_date:
+          type: ["string", "null"]
+        created_at:
+          type: string
+        days_since_join:
+          type: ["integer", "null"]
+
+    UnmatchedQueue:
+      type: object
+      required: [minis_pool, core_pool, urgent_count, warning_count]
+      properties:
+        minis_pool:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChildWithParent"
+        core_pool:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChildWithParent"
+        urgent_count:
+          type: integer
+        warning_count:
+          type: integer
+
+    MatchSuggestion:
+      type: object
+      required: [child_a_id, child_b_id, shared_interests, confidence_score, reasoning]
+      properties:
+        child_a_id:
+          type: string
+        child_b_id:
+          type: string
+        child_a:
+          $ref: "#/components/schemas/ChildWithParent"
+        child_b:
+          $ref: "#/components/schemas/ChildWithParent"
+        shared_interests:
+          type: array
+          items:
+            type: string
+        confidence_score:
+          type: integer
+          description: 1-10
+        reasoning:
+          type: string
+
+    MatchSession:
+      type: object
+      required: [suggestions, total_unmatched, no_match_found]
+      properties:
+        suggestions:
+          type: array
+          items:
+            $ref: "#/components/schemas/MatchSuggestion"
+        total_unmatched:
+          type: integer
+        no_match_found:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChildWithParent"
+
+    MatchApproval:
+      type: object
+      required: [child_a_id, child_b_id, shared_interests]
+      properties:
+        child_a_id:
+          type: string
+        child_b_id:
+          type: string
+        shared_interests:
+          type: array
+          items:
+            type: string
+
+    Match:
+      type: object
+      required: [id, child_a_id, child_b_id, match_status, created_at]
+      properties:
+        id:
+          type: string
+        child_a_id:
+          type: string
+        child_b_id:
+          type: string
+        match_date:
+          type: ["string", "null"]
+        match_status:
+          type: string
+          description: Active / Closed
+        shared_interests:
+          type: array
+          items:
+            type: string
+        match_notification_sent_a:
+          type: ["boolean", "null"]
+        match_notification_sent_b:
+          type: ["boolean", "null"]
+        close_reason:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        created_at:
+          type: string
+
+    MatchUpdate:
+      type: object
+      properties:
+        match_status:
+          type: string
+        close_reason:
+          type: string
+        notes:
+          type: string
+        match_notification_sent_a:
+          type: boolean
+        match_notification_sent_b:
+          type: boolean
+
+    MatchWithChildren:
+      allOf:
+        - $ref: "#/components/schemas/Match"
+        - type: object
+          properties:
+            child_a:
+              $ref: "#/components/schemas/ChildWithParent"
+            child_b:
+              $ref: "#/components/schemas/ChildWithParent"
+
+    StatsSummary:
+      type: object
+      required: [total_unmatched, total_matched, total_active_matches, minis_unmatched, core_unmatched, urgent_guarantee, warning_guarantee, incomplete_onboarding, matches_this_week, matches_this_month]
+      properties:
+        total_unmatched:
+          type: integer
+        total_matched:
+          type: integer
+        total_active_matches:
+          type: integer
+        minis_unmatched:
+          type: integer
+        core_unmatched:
+          type: integer
+        urgent_guarantee:
+          type: integer
+        warning_guarantee:
+          type: integer
+        incomplete_onboarding:
+          type: integer
+        matches_this_week:
+          type: integer
+        matches_this_month:
+          type: integer

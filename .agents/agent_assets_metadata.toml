@@ -1,0 +1,14 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "VlJUHikaWngeHdOoGqEuD"
+uri = "file://mailday-matching.tar.gz"
+type = "unspecified"
+title = "MailDay Matching — source code"
+
+[[outputs]]
+id = "gkYt-N4Zu2oSi0Vt9oQoD"
+uri = "file://mailday-matching.zip"
+type = "unspecified"
+title = "MailDay Matching — source code"

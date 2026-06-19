@@ -1,0 +1,63 @@
+Here you go:
+
+---
+
+Add the Cancellation Tracker to the existing MailDay Matching app.
+
+**New Supabase table — Cancellations:**
+
+id, parent_id (foreign key to Parents), child_id (foreign key to Children — nullable, since a cancellation may be at the parent level), cancellation_date, tenure_months (calculated — months between join_date and cancellation_date), tier (Core / Minis / Homeschool Core / Homeschool Minis), billing_type (Monthly / Annual), cancellation_reason_raw (text — raw reason passed from ReCharge if available), cancellation_reason_category (Price / No letter exchange with pen pal / Wrong match / Life circumstances / Moving / Found alternative / Unknown), save_attempted (boolean), save_outcome (Saved / Not Saved / No Response / null), save_notes (long text), recharge_subscription_id, internal_notes_timeline (same structure as Member Notes Timeline already built), created_date
+
+**How cancellation records are created:**
+
+When a ReCharge webhook fires indicating a subscription has been cancelled the app automatically: updates the Parent record subscription_status to Cancelled, creates a new record in the Cancellations table populated with parent details, tenure, tier, billing type, and raw cancellation reason if ReCharge provides one, creates a system event in the Member Notes Timeline on the Parent record, and surfaces a new cancellation alert in the Action Items queue and on the Operations Dashboard.
+
+The cancellation_reason_category field is not set automatically — admin reviews each new cancellation and selects the closest category from the dropdown. This is a required step before the cancellation record is considered fully processed. Unprocessed cancellations — those with no category selected — appear with a badge in the Cancellation Tracker and in Action Items.
+
+**The Cancellation Tracker — left navigation under Operations:**
+
+Admin only. VA does not see this view and it does not appear in VA navigation.
+
+**Four views inside the Cancellation Tracker:**
+
+All Cancellations — every cancellation record in reverse chronological order. Shows member name, tier, join date, cancellation date, tenure in months, reason category, save attempted status. Filterable by tier, reason category, billing type, and date range. Searchable by member name and email. Exportable as CSV.
+
+Unprocessed — cancellations where cancellation_reason_category has not yet been selected. Sorted oldest first. Each record has a Process button that opens the record for category selection and notes. This view should show a zero state message when empty: All cancellations processed. Nice work.
+
+Save Opportunities — cancellations where save_attempted = false and cancellation_date is within the last 30 days. These are members who cancelled recently and have not yet been contacted about saving. Admin decides whether to reach out — the app never automates outreach. Each record has a Mark Save Attempted button and a notes field. When clicked it opens a panel to log the outreach attempt and outcome.
+
+Cancellation Trends — charts and analytics. Admin only. Shows: cancellations by month as a bar chart going back 12 months, cancellation reason breakdown as a percentage pie chart for the last 90 days and last 12 months, average tenure at cancellation by tier as a comparison chart, monthly net member change — new members minus cancellations — as a line chart, MRR lost to cancellations by month. All charts update in real time from live data. No static numbers — everything pulls from the Cancellations table directly.
+
+**Individual cancellation record view:**
+
+Full record with all editable fields. Member name links directly to their Parent record. Cancellation reason category dropdown — required. Save attempted toggle. Save outcome dropdown — appears only when save_attempted = true — options: Saved, Not Saved, No Response. Save notes field. Internal notes timeline at the bottom — same structure as Member Notes Timeline — with system events and manual notes in reverse chronological order.
+
+If save_outcome = Saved: prompt admin to reactivate the member — show a Reactivate Member button that sets the Parent record subscription_status back to Active and creates a system event in both the Parent record timeline and the Cancellation record timeline noting the save date and who processed it.
+
+**On the Operations Dashboard:**
+
+Add to the existing dashboard in the Member Health section: cancellations this month count, cancellations this quarter count, top cancellation reason this quarter, net member change this month — new members minus cancellations — displayed as a positive or negative number with a green or red indicator. Link each metric directly to the relevant view in the Cancellation Tracker.
+
+**On Action Items:**
+
+New cancellations that have not been processed — no reason category selected — appear as action items under a Cancellations section with the label: New cancellation — review needed — member name, tier, cancellation date. Clicking the item opens the cancellation record directly.
+
+Save Opportunities older than 7 days with no save attempt appear as action items under the same section with the label: Save window closing — member name cancelled X days ago.
+
+**ReCharge webhook integration:**
+
+Build the webhook receiver at /api/webhooks/recharge-cancellations. The webhook should receive the ReCharge cancellation payload, extract subscription ID, customer email, cancellation reason if provided, and cancellation date. Match the subscription ID or email to the existing Parent record. Create the Cancellation record. Fire the Operations Dashboard and Action Items updates. Include webhook signature verification. Log all incoming webhooks — successful and failed — in a webhook log viewable by Admin under Settings.
+
+**Build order:**
+1. Supabase schema — Cancellations table and any modifications to existing tables — show me schema changes and ask me to confirm before writing any frontend
+2. ReCharge webhook receiver
+3. All Cancellations view
+4. Unprocessed view
+5. Save Opportunities view
+6. Individual cancellation record view with save flow
+7. Reactivate Member logic
+8. Cancellation Trends view with charts
+9. Operations Dashboard updates
+10. Action Items integration
+
+Show me the schema changes first before writing any frontend code.

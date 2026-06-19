@@ -1,0 +1,950 @@
+/**
+ * Lifecycle jobs — daily crons that drive the automated parts of the
+ * lifecycle map's Spine and Branches, plus admin endpoints to trigger
+ * each job manually (handy for testing) and a generic mark-task-complete
+ * endpoint that all of the lifecycle_tasks rows use.
+ *
+ * Jobs in this file (Phase 2):
+ *   • runIncompleteOnboardingNudges()  — Block B (§ 2.3) — daily 9 am MT
+ *   • runGuaranteeBreachJob()          — Block C (§ 2.4) — daily 9 am MT
+ *
+ * Future jobs (Phase 3+):
+ *   • aging-out cron (Phase 3.5)
+ *   • day-30 win-back trigger (Phase 4.2 — actually Klaviyo handles via event)
+ */
+
+import { Router, type IRouter } from "express";
+import cron from "node-cron";
+import { supabase } from "../lib/supabase.js";
+import { logger } from "../lib/logger.js";
+import { requireAuth, requireAdmin, type AuthRequest } from "../middlewares/auth.js";
+import { sendEmail } from "../lib/email.js";
+import { logAudit } from "../lib/audit.js";
+import { differenceInDays, parseISO } from "date-fns";
+import { tierChangeOnAging, isCrossTier } from "../lib/age.js";
+import { offboardFamily } from "../lib/lifecycle.js";
+
+const router: IRouter = Router();
+
+// ─── Tunables ─────────────────────────────────────────────────────────────────
+
+/** Send R1 onboarding-nudge after this many days of no children completion. */
+const NUDGE_AFTER_DAYS = 3;
+/** Escalate to Action Items after this many days. */
+const ESCALATE_AFTER_DAYS = 7;
+/** Stop nudging / chasing after this many days (after this the parent is a
+ *  separate problem; we stop pestering). */
+const STOP_NUDGING_AFTER_DAYS = 30;
+/** Guarantee breach threshold per the lifecycle map. */
+const GUARANTEE_BREACH_DAYS = 21;
+/** A match left in Pending with addresses unconfirmed after this many days gets a chase task. */
+const ADDRESS_CONFIRM_CHASE_DAYS = 7;
+/** A Poppy card task open this many days = family treated as offboarded. */
+const WINBACK_FAIL_AFTER_DAYS = 60;
+
+// ─── Block B: Incomplete-onboarding nudge ────────────────────────────────────
+
+export interface OnboardingNudgeResult {
+  scanned: number;
+  nudgesSent: number;
+  tasksCreated: number;
+  errors: string[];
+  ranAt: string;
+}
+
+/**
+ * Find parents with no children completed onboarding, send the nudge email,
+ * and escalate to a lifecycle_task after ESCALATE_AFTER_DAYS.
+ *
+ * Idempotency:
+ *   • Nudge: filtered by `onboarding_nudge_sent_at IS NULL` so a parent only
+ *     gets one nudge per onboarding cycle.
+ *   • Task: created only if no open lifecycle_tasks row of type
+ *     'incomplete_onboarding_followup' exists for that parent.
+ */
+export async function runIncompleteOnboardingNudges(): Promise<OnboardingNudgeResult> {
+  const result: OnboardingNudgeResult = {
+    scanned: 0,
+    nudgesSent: 0,
+    tasksCreated: 0,
+    errors: [],
+    ranAt: new Date().toISOString(),
+  };
+
+  // 1. Pull all parents created between [STOP_NUDGING_AFTER_DAYS] and [NUDGE_AFTER_DAYS] days ago.
+  const now = new Date();
+  const earliest = new Date(now.getTime() - STOP_NUDGING_AFTER_DAYS * 86400000).toISOString();
+  const latest = new Date(now.getTime() - NUDGE_AFTER_DAYS * 86400000).toISOString();
+
+  // Phase 3.7: also filter out voluntary-paused families. They've intentionally
+  // stepped away from the product — nudging them to complete onboarding
+  // contradicts that signal.
+  const { data: candidates, error } = await supabase
+    .from("parents")
+    .select("id, first_name, email, onboarding_token, created_at, onboarding_nudge_sent_at, subscription_status, pause_type")
+    .gte("created_at", earliest)
+    .lte("created_at", latest);
+
+  if (error) {
+    result.errors.push(`Failed to load candidates: ${error.message}`);
+    logger.error({ error }, "Onboarding-nudge cron: failed to load candidates");
+    return result;
+  }
+
+  if (!candidates || candidates.length === 0) {
+    logger.info(result, "Onboarding-nudge cron: no candidates");
+    return result;
+  }
+
+  // 2. Filter: must have NO children
+  const candidateIds = candidates.map((p) => p.id);
+  const { data: childRefs } = await supabase
+    .from("children")
+    .select("parent_id")
+    .in("parent_id", candidateIds);
+  const parentsWithChildren = new Set((childRefs ?? []).map((c) => c.parent_id));
+  const incomplete = candidates.filter((p) => !parentsWithChildren.has(p.id));
+  result.scanned = incomplete.length;
+
+  // 3. Pull existing lifecycle_tasks of this type for incomplete parents (idempotency)
+  let existingTaskParentIds = new Set<string>();
+  if (incomplete.length > 0) {
+    const { data: existingTasks } = await supabase
+      .from("lifecycle_tasks")
+      .select("parent_id")
+      .eq("type", "incomplete_onboarding_followup")
+      .eq("completed", false)
+      .in("parent_id", incomplete.map((p) => p.id));
+    existingTaskParentIds = new Set((existingTasks ?? []).map((t) => t.parent_id));
+  }
+
+  const appBase = appBaseUrl();
+
+  // 4. For each, decide: send nudge / create task / skip
+  for (const parent of incomplete) {
+    try {
+      // Only act on Active subscribers — paused/cancelled families shouldn't be nudged.
+      if (parent.subscription_status && parent.subscription_status !== "Active") {
+        continue;
+      }
+      // Phase 3.7: also skip voluntarily-paused families.
+      if (parent.pause_type === "voluntary") continue;
+
+      const daysOld = differenceInDays(now, parseISO(parent.created_at as string));
+
+      // 4a. Send the R1 nudge once.
+      if (!parent.onboarding_nudge_sent_at && daysOld >= NUDGE_AFTER_DAYS) {
+        const onboardingUrl = `${appBase}/onboarding?token=${parent.onboarding_token}`;
+        const sendResult = await sendEmail({
+          to: parent.email as string,
+          templateKey: "onboarding_nudge",
+          vars: {
+            onboarding_url: onboardingUrl,
+            parent_first_name: parent.first_name ?? "",
+          },
+        });
+
+        if (sendResult.ok) {
+          await supabase
+            .from("parents")
+            .update({ onboarding_nudge_sent_at: new Date().toISOString() })
+            .eq("id", parent.id);
+          result.nudgesSent++;
+
+          await logAudit({
+            action: "parent.onboarding_nudge_sent",
+            entityType: "parent",
+            entityId: parent.id,
+            metadata: { daysOld, emailStatus: sendResult.status },
+          });
+        } else {
+          result.errors.push(`nudge send failed for ${parent.email}: ${sendResult.error ?? sendResult.status}`);
+        }
+      }
+
+      // 4b. After ESCALATE_AFTER_DAYS, also create a task (if one isn't open already).
+      if (daysOld >= ESCALATE_AFTER_DAYS && !existingTaskParentIds.has(parent.id)) {
+        const { error: taskErr } = await supabase.from("lifecycle_tasks").insert({
+          type: "incomplete_onboarding_followup",
+          title: `Follow up with ${parent.first_name ?? parent.email} — onboarding incomplete after ${daysOld} days`,
+          description: `They paid but never added their child. Nudge email already sent. Try a personal reach-out.`,
+          parent_id: parent.id,
+        });
+        if (taskErr) {
+          result.errors.push(`task create failed for ${parent.email}: ${taskErr.message}`);
+        } else {
+          result.tasksCreated++;
+          await logAudit({
+            action: "lifecycle_task.created",
+            entityType: "parent",
+            entityId: parent.id,
+            metadata: { type: "incomplete_onboarding_followup", daysOld },
+          });
+        }
+      }
+    } catch (err) {
+      result.errors.push(`exception for ${parent.email}: ${String(err)}`);
+      logger.error({ err, parentId: parent.id }, "Onboarding-nudge cron: per-parent error");
+    }
+  }
+
+  logger.info(result, "Onboarding-nudge cron completed");
+  return result;
+}
+
+// ─── Block C: Guarantee breach contact ───────────────────────────────────────
+
+export interface GuaranteeBreachResult {
+  scanned: number;
+  newlyFlagged: number;
+  emailsSent: number;
+  tasksCreated: number;
+  errors: string[];
+  ranAt: string;
+}
+
+/**
+ * Find children whose 21-day guarantee window has expired but haven't been
+ * matched yet. For each:
+ *   • Flip `parents.pause_type = 'guarantee'` and `parents.billing_paused = true`
+ *     (also on the children rows, mirrored).
+ *   • Create a contact_guarantee_breach lifecycle_task — description includes
+ *     a reminder for the human to pause the ReCharge subscription manually
+ *     (per the lifecycle map, ReCharge pausing stays a human step for safety).
+ *   • Send R3 (Courtney's apology + reassurance email) via Resend.
+ *
+ * Idempotency:
+ *   • `parents.pause_type IS NULL` filter — once we've flagged a guarantee
+ *     breach we don't re-flag.
+ *   • Task: only create if no open one of this type exists for the parent.
+ */
+export async function runGuaranteeBreachJob(): Promise<GuaranteeBreachResult> {
+  const result: GuaranteeBreachResult = {
+    scanned: 0,
+    newlyFlagged: 0,
+    emailsSent: 0,
+    tasksCreated: 0,
+    errors: [],
+    ranAt: new Date().toISOString(),
+  };
+
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - GUARANTEE_BREACH_DAYS * 86400000).toISOString().split("T")[0];
+
+  // 1. Find unmatched / rematch-requested children whose clock has expired.
+  const { data: children, error } = await supabase
+    .from("children")
+    .select("id, child_first_name, parent_id, match_guarantee_start_date, match_status")
+    .in("match_status", ["Unmatched", "Rematch Requested"])
+    .lte("match_guarantee_start_date", cutoff);
+
+  if (error) {
+    result.errors.push(`Failed to load children: ${error.message}`);
+    return result;
+  }
+  if (!children || children.length === 0) {
+    logger.info(result, "Guarantee-breach cron: nothing to do");
+    return result;
+  }
+
+  result.scanned = children.length;
+
+  // 2. Load each child's parent in one query.
+  const parentIds = [...new Set(children.map((c) => c.parent_id))];
+  const { data: parents } = await supabase
+    .from("parents")
+    .select("id, first_name, email, pause_type, billing_paused, subscription_status")
+    .in("id", parentIds);
+
+  const parentMap = new Map((parents ?? []).map((p) => [p.id, p]));
+
+  // 3. Existing open tasks (idempotency)
+  const { data: existingTasks } = await supabase
+    .from("lifecycle_tasks")
+    .select("parent_id")
+    .eq("type", "contact_guarantee_breach")
+    .eq("completed", false)
+    .in("parent_id", parentIds);
+  const taskedParents = new Set((existingTasks ?? []).map((t) => t.parent_id));
+
+  // 4. Per-child work, grouped by parent (one email per family).
+  const processedParents = new Set<string>();
+
+  for (const child of children) {
+    const parent = parentMap.get(child.parent_id);
+    if (!parent) continue;
+
+    // Skip families that are paused/cancelled — guarantee breach doesn't apply.
+    if (parent.subscription_status && parent.subscription_status !== "Active") continue;
+
+    // Skip families we already flagged (pause_type already set to 'guarantee').
+    if (parent.pause_type) continue;
+
+    // One email per parent (even if they have multiple children).
+    if (processedParents.has(parent.id)) continue;
+    processedParents.add(parent.id);
+
+    try {
+      const daysWaiting = differenceInDays(
+        now,
+        parseISO(child.match_guarantee_start_date as string),
+      );
+
+      // 4a. Flip the flags on parent + all their children.
+      await supabase
+        .from("parents")
+        .update({ pause_type: "guarantee", billing_paused: true })
+        .eq("id", parent.id);
+      await supabase
+        .from("children")
+        .update({ billing_paused: true })
+        .eq("parent_id", parent.id);
+      result.newlyFlagged++;
+
+      // 4b. Send R3 (guarantee_breach template).
+      const sendResult = await sendEmail({
+        to: parent.email as string,
+        templateKey: "guarantee_breach",
+        vars: {
+          child_first_name: child.child_first_name ?? "your child",
+          parent_first_name: parent.first_name ?? "",
+          days_waiting: daysWaiting,
+        },
+      });
+      if (sendResult.ok) {
+        result.emailsSent++;
+      } else {
+        result.errors.push(`R3 send failed for ${parent.email}: ${sendResult.error ?? sendResult.status}`);
+      }
+
+      // 4c. Create the lifecycle_task (one per parent if not already open).
+      if (!taskedParents.has(parent.id)) {
+        const { error: taskErr } = await supabase.from("lifecycle_tasks").insert({
+          type: "contact_guarantee_breach",
+          title: `Guarantee breach — pause ReCharge for ${parent.first_name ?? parent.email}`,
+          description:
+            "App has set billing_paused locally and sent the guarantee-breach email. " +
+            "Action: log into ReCharge and pause this family's subscription. " +
+            "Once you've paused in ReCharge and personally followed up, click 'Mark confirmed'.",
+          parent_id: parent.id,
+          child_id: child.id,
+        });
+        if (taskErr) {
+          result.errors.push(`task create failed for ${parent.email}: ${taskErr.message}`);
+        } else {
+          result.tasksCreated++;
+        }
+      }
+
+      await logAudit({
+        action: "parent.guarantee_breach_flagged",
+        entityType: "parent",
+        entityId: parent.id,
+        payloadAfter: { pause_type: "guarantee", billing_paused: true },
+        metadata: { childId: child.id, daysWaiting },
+      });
+    } catch (err) {
+      result.errors.push(`exception for parent ${parent.id}: ${String(err)}`);
+      logger.error({ err, parentId: parent.id }, "Guarantee-breach cron: per-parent error");
+    }
+  }
+
+  logger.info(result, "Guarantee-breach cron completed");
+  return result;
+}
+
+// ─── Block D: Chase address-confirmation on stale pending matches ────────────
+
+export interface ChaseAddressResult {
+  scanned: number;
+  tasksCreated: number;
+  errors: string[];
+  ranAt: string;
+}
+
+/**
+ * Find matches still in `Pending` after ADDRESS_CONFIRM_CHASE_DAYS days with at
+ * least one side unconfirmed. Create a `chase_address_confirmation`
+ * lifecycle_task per such match (idempotent on match_id).
+ *
+ * The lifecycle map's policy (resolved 2026-06-03) is: no auto-retry email,
+ * just a task so a human can follow up personally. Courtney always handles the
+ * personal nudge.
+ */
+export async function runChaseAddressConfirmation(): Promise<ChaseAddressResult> {
+  const result: ChaseAddressResult = {
+    scanned: 0,
+    tasksCreated: 0,
+    errors: [],
+    ranAt: new Date().toISOString(),
+  };
+
+  const cutoff = new Date(
+    Date.now() - ADDRESS_CONFIRM_CHASE_DAYS * 86400000,
+  ).toISOString();
+
+  const { data: stale, error } = await supabase
+    .from("matches")
+    .select("id, child_a_id, child_b_id, address_confirmed_a, address_confirmed_b, created_at")
+    .eq("match_status", "Pending")
+    .lte("created_at", cutoff);
+
+  if (error) {
+    result.errors.push(`Failed to load pending matches: ${error.message}`);
+    return result;
+  }
+  if (!stale || stale.length === 0) {
+    logger.info(result, "Chase-address cron: no stale Pending matches");
+    return result;
+  }
+
+  result.scanned = stale.length;
+
+  // Idempotency: skip matches that already have an open chase task.
+  const matchIds = stale.map((m) => m.id);
+  const { data: existing } = await supabase
+    .from("lifecycle_tasks")
+    .select("match_id")
+    .eq("type", "chase_address_confirmation")
+    .eq("completed", false)
+    .in("match_id", matchIds);
+  const already = new Set((existing ?? []).map((t) => t.match_id));
+
+  for (const match of stale) {
+    if (already.has(match.id)) continue;
+
+    // Build a useful title with the family names.
+    const childIds = [match.child_a_id, match.child_b_id].filter(Boolean);
+    const { data: children } = await supabase
+      .from("children")
+      .select("id, child_first_name, parents(first_name, last_name)")
+      .in("id", childIds);
+    const names = (children ?? []).map((c) => {
+      const p = (c as Record<string, unknown>)["parents"] as
+        | { first_name?: string; last_name?: string }
+        | null;
+      const family = p ? `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim() : "?";
+      return `${c.child_first_name} (${family})`;
+    });
+
+    const sideA = match.address_confirmed_a ? "confirmed" : "unconfirmed";
+    const sideB = match.address_confirmed_b ? "confirmed" : "unconfirmed";
+    const stillUnconfirmed: string[] = [];
+    if (!match.address_confirmed_a) stillUnconfirmed.push("first family");
+    if (!match.address_confirmed_b) stillUnconfirmed.push("second family");
+
+    const { error: taskErr } = await supabase.from("lifecycle_tasks").insert({
+      type: "chase_address_confirmation",
+      title: `Chase address confirmation — ${names.join(" & ")}`,
+      description:
+        `Match has been Pending for ${ADDRESS_CONFIRM_CHASE_DAYS}+ days. ` +
+        `Sides: side A ${sideA}, side B ${sideB}. ` +
+        `Please follow up with ${stillUnconfirmed.join(" and ")} personally.`,
+      match_id: match.id,
+    });
+
+    if (taskErr) {
+      result.errors.push(`task create failed for match ${match.id}: ${taskErr.message}`);
+    } else {
+      result.tasksCreated++;
+      await logAudit({
+        action: "lifecycle_task.created",
+        entityType: "match",
+        entityId: match.id,
+        metadata: { type: "chase_address_confirmation" },
+      });
+    }
+  }
+
+  logger.info(result, "Chase-address cron completed");
+  return result;
+}
+
+// ─── Block 3.4: Win-back fails (offboarding trigger) ─────────────────────────
+
+export interface WinbackFailsResult {
+  scanned: number;
+  offboarded: number;
+  errors: string[];
+  ranAt: string;
+}
+
+/**
+ * If a `send_poppy_card` task has been OPEN for WINBACK_FAIL_AFTER_DAYS, the
+ * family did not re-engage. Treat them as offboarded:
+ *   • Mark the Poppy card task complete with a system reason
+ *   • Set parents.offboarded_at = NOW()
+ *   • Trigger the shared offboarding routine inline (Phase 4 will extract this
+ *     into lib/lifecycle.ts; for now we do the minimum: stamp offboarded_at,
+ *     mark children Cancelled, emit `family_offboarded` Klaviyo event).
+ */
+export async function runWinbackFailsOffboarding(): Promise<WinbackFailsResult> {
+  const result: WinbackFailsResult = {
+    scanned: 0,
+    offboarded: 0,
+    errors: [],
+    ranAt: new Date().toISOString(),
+  };
+
+  const cutoff = new Date(Date.now() - WINBACK_FAIL_AFTER_DAYS * 86400000).toISOString();
+
+  const { data: stale, error } = await supabase
+    .from("lifecycle_tasks")
+    .select("id, parent_id, created_at")
+    .eq("type", "send_poppy_card")
+    .eq("completed", false)
+    .lte("created_at", cutoff);
+
+  if (error) {
+    result.errors.push(`Failed to load stale Poppy tasks: ${error.message}`);
+    return result;
+  }
+  if (!stale || stale.length === 0) {
+    logger.info(result, "Winback-fails cron: nothing to do");
+    return result;
+  }
+
+  result.scanned = stale.length;
+  const now = new Date().toISOString();
+
+  for (const task of stale) {
+    if (!task.parent_id) continue;
+    try {
+      // Delegate cascade to the shared offboarding helper. Klaviyo event,
+      // partner orphan re-queue, cancellation row, audit log — all handled.
+      await offboardFamily({
+        parentId: task.parent_id,
+        reason: "winback_failed",
+        note: `Win-back email sequence + Poppy card (task ${task.id}) failed; ${WINBACK_FAIL_AFTER_DAYS}+ days without re-engagement.`,
+      });
+
+      // Mark the Poppy task itself complete so it stops appearing in Action Items.
+      await supabase
+        .from("lifecycle_tasks")
+        .update({
+          completed: true,
+          completed_at: now,
+          completed_by: "system:winback-fails",
+        })
+        .eq("id", task.id);
+
+      result.offboarded++;
+    } catch (err) {
+      result.errors.push(`task ${task.id}: ${String(err)}`);
+    }
+  }
+
+  logger.info(result, "Winback-fails cron completed");
+  return result;
+}
+
+// ─── Block 3.9: Finalise cancellations after 48h grace ───────────────────────
+
+const PAUSE_OFFER_GRACE_HOURS = 48;
+
+export interface FinaliseCancellationsResult {
+  scanned: number;
+  finalised: number;
+  errors: string[];
+  ranAt: string;
+}
+
+/**
+ * Find parents who got the pause-offer R4 email 48h+ ago and haven't either
+ * accepted the pause or confirmed the cancellation. Finalise:
+ *   • End matches, orphan partners (Phase 4 will use the shared re-queue routine)
+ *   • Mark children Cancelled
+ *   • Mark parent.subscription_status='Cancelled', offboarded_at=NOW
+ *   • Emit Klaviyo `family_offboarded` event so K7 day-30 win-back fires
+ */
+export async function runFinaliseCancellations(): Promise<FinaliseCancellationsResult> {
+  const result: FinaliseCancellationsResult = {
+    scanned: 0,
+    finalised: 0,
+    errors: [],
+    ranAt: new Date().toISOString(),
+  };
+
+  const cutoff = new Date(Date.now() - PAUSE_OFFER_GRACE_HOURS * 3600000).toISOString();
+
+  const { data: parents, error } = await supabase
+    .from("parents")
+    .select("id, email, first_name, intent_to_cancel_at, pause_offer_accepted, offboarded_at")
+    .lte("intent_to_cancel_at", cutoff)
+    .is("pause_offer_accepted", null)
+    .is("offboarded_at", null);
+
+  if (error) {
+    result.errors.push(`load parents: ${error.message}`);
+    return result;
+  }
+  if (!parents || parents.length === 0) {
+    logger.info(result, "Finalise-cancellations cron: nothing to do");
+    return result;
+  }
+
+  result.scanned = parents.length;
+
+  // Delegate to the shared offboarding helper — same routine the win-back-fails
+  // cron and (future) admin "Force offboard" button will use.
+  for (const p of parents) {
+    try {
+      await offboardFamily({
+        parentId: p.id,
+        reason: "cancellation_finalised",
+        note: "48h pause-offer grace expired without response",
+      });
+      result.finalised++;
+    } catch (err) {
+      result.errors.push(`parent ${p.id}: ${String(err)}`);
+    }
+  }
+
+  logger.info(result, "Finalise-cancellations cron completed");
+  return result;
+}
+
+// ─── Block 3.5 + 3.6: Aging-out cron + tier mismatch flag ────────────────────
+
+export interface AgingResult {
+  scanned: number;
+  agedOut: number;
+  matchesFlagged: number;
+  errors: string[];
+  ranAt: string;
+}
+
+/**
+ * Daily aging-out cron. For each child with a date_of_birth:
+ *   • Recompute the tier based on current age.
+ *   • If different from their stored tier → update + audit.
+ *   • If the child is in an Active match, check whether it's now cross-tier;
+ *     if so, flag the match for admin review (Phase 3.6).
+ */
+export async function runAgingOutCron(): Promise<AgingResult> {
+  const result: AgingResult = {
+    scanned: 0,
+    agedOut: 0,
+    matchesFlagged: 0,
+    errors: [],
+    ranAt: new Date().toISOString(),
+  };
+
+  const { data: children, error } = await supabase
+    .from("children")
+    .select("id, child_first_name, date_of_birth, tier, parent_id, match_status")
+    .not("date_of_birth", "is", null);
+
+  if (error) {
+    result.errors.push(`Failed to load children: ${error.message}`);
+    return result;
+  }
+  if (!children || children.length === 0) {
+    logger.info(result, "Aging cron: no children with DOB");
+    return result;
+  }
+
+  result.scanned = children.length;
+
+  for (const c of children) {
+    try {
+      const change = tierChangeOnAging(c.date_of_birth as string, c.tier as string);
+      if (!change) continue;
+
+      await supabase.from("children").update({ tier: change.to }).eq("id", c.id);
+      result.agedOut++;
+
+      await logAudit({
+        action: "child.tier_aged_out",
+        entityType: "child",
+        entityId: c.id,
+        payloadBefore: { tier: change.from },
+        payloadAfter: { tier: change.to },
+        metadata: { source: "aging_cron", child_first_name: c.child_first_name },
+      });
+
+      // If they're in an Active match, the partner may now be cross-tier.
+      if (c.match_status === "Matched") {
+        const matchRow = await supabase
+          .from("matches")
+          .select("id, child_a_id, child_b_id, tier_mismatch_flagged")
+          .eq("match_status", "Active")
+          .or(`child_a_id.eq.${c.id},child_b_id.eq.${c.id}`)
+          .maybeSingle();
+        const match = matchRow.data as {
+          id: string;
+          child_a_id: string;
+          child_b_id: string;
+          tier_mismatch_flagged: boolean | null;
+        } | null;
+        if (match && !match.tier_mismatch_flagged) {
+          const partnerId = match.child_a_id === c.id ? match.child_b_id : match.child_a_id;
+          const partner = await supabase
+            .from("children")
+            .select("child_first_name, tier")
+            .eq("id", partnerId)
+            .single();
+          const partnerData = partner.data as { child_first_name: string; tier: string } | null;
+          if (partnerData && isCrossTier(change.to, partnerData.tier)) {
+            await supabase
+              .from("matches")
+              .update({ tier_mismatch_flagged: true })
+              .eq("id", match.id);
+
+            const { data: existing } = await supabase
+              .from("lifecycle_tasks")
+              .select("id")
+              .eq("type", "review_tier_mismatch")
+              .eq("completed", false)
+              .eq("match_id", match.id);
+
+            if (!existing || existing.length === 0) {
+              await supabase.from("lifecycle_tasks").insert({
+                type: "review_tier_mismatch",
+                title: `Tier mismatch — ${c.child_first_name} (${change.to}) & ${partnerData.child_first_name} (${partnerData.tier})`,
+                description:
+                  `${c.child_first_name} aged out of ${change.from} and is now ${change.to}, ` +
+                  `but their pen pal is still ${partnerData.tier}. Decide whether to dissolve.`,
+                match_id: match.id,
+                child_id: c.id,
+              });
+              result.matchesFlagged++;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      result.errors.push(`child ${c.id}: ${String(err)}`);
+    }
+  }
+
+  logger.info(result, "Aging cron completed");
+  return result;
+}
+
+// ─── Cron scheduler ──────────────────────────────────────────────────────────
+
+let nudgeJob: ReturnType<typeof cron.schedule> | null = null;
+let breachJob: ReturnType<typeof cron.schedule> | null = null;
+let chaseAddressJob: ReturnType<typeof cron.schedule> | null = null;
+let winbackFailsJob: ReturnType<typeof cron.schedule> | null = null;
+let agingJob: ReturnType<typeof cron.schedule> | null = null;
+let finaliseCancellationsJob: ReturnType<typeof cron.schedule> | null = null;
+
+/** Start both daily lifecycle crons at 9 AM Mountain. */
+export function startLifecycleCrons(): void {
+  // 9 AM MT, daily — far enough into the morning that we won't wake Courtney.
+  nudgeJob = cron.schedule(
+    "0 9 * * *",
+    () => {
+      void runIncompleteOnboardingNudges().catch((err) =>
+        logger.error({ err }, "Onboarding-nudge cron failed"),
+      );
+    },
+    { timezone: "America/Denver" },
+  );
+  breachJob = cron.schedule(
+    "5 9 * * *",
+    () => {
+      void runGuaranteeBreachJob().catch((err) =>
+        logger.error({ err }, "Guarantee-breach cron failed"),
+      );
+    },
+    { timezone: "America/Denver" },
+  );
+  chaseAddressJob = cron.schedule(
+    "10 9 * * *",
+    () => {
+      void runChaseAddressConfirmation().catch((err) =>
+        logger.error({ err }, "Chase-address cron failed"),
+      );
+    },
+    { timezone: "America/Denver" },
+  );
+  winbackFailsJob = cron.schedule(
+    "15 9 * * *",
+    () => {
+      void runWinbackFailsOffboarding().catch((err) =>
+        logger.error({ err }, "Winback-fails cron failed"),
+      );
+    },
+    { timezone: "America/Denver" },
+  );
+  agingJob = cron.schedule(
+    "20 9 * * *",
+    () => {
+      void runAgingOutCron().catch((err) => logger.error({ err }, "Aging cron failed"));
+    },
+    { timezone: "America/Denver" },
+  );
+  // Finalise-cancellations runs every 4 hours so we don't drift too far past
+  // the 48h grace boundary. 9:25, 13:25, 17:25, 21:25, etc.
+  finaliseCancellationsJob = cron.schedule(
+    "25 */4 * * *",
+    () => {
+      void runFinaliseCancellations().catch((err) =>
+        logger.error({ err }, "Finalise-cancellations cron failed"),
+      );
+    },
+    { timezone: "America/Denver" },
+  );
+  logger.info(
+    "Lifecycle crons scheduled (9:00, 9:05, 9:10, 9:15, 9:20 daily + finalise every 4h — America/Denver)",
+  );
+}
+
+export function stopLifecycleCrons(): void {
+  nudgeJob?.stop();
+  breachJob?.stop();
+  chaseAddressJob?.stop();
+  winbackFailsJob?.stop();
+  agingJob?.stop();
+  finaliseCancellationsJob?.stop();
+  nudgeJob = null;
+  breachJob = null;
+  chaseAddressJob = null;
+  winbackFailsJob = null;
+  agingJob = null;
+  finaliseCancellationsJob = null;
+}
+
+// ─── App-URL helper (mirrors the one in webhooks.ts; kept local to avoid extra import surface) ─
+
+function appBaseUrl(): string {
+  const explicit = process.env["APP_URL"];
+  if (explicit) return explicit.replace(/\/+$/, "");
+  const replit = (process.env["REPLIT_DOMAINS"] ?? "").split(",")[0]?.trim();
+  if (replit) return `https://${replit}`;
+  return "http://localhost";
+}
+
+// ─── Admin manual triggers (very useful for testing) ─────────────────────────
+
+router.post(
+  "/admin/lifecycle/onboarding-nudge/run",
+  requireAuth,
+  requireAdmin,
+  async (req: AuthRequest, res) => {
+    req.log?.info({ by: req.user?.email }, "Manual onboarding-nudge run triggered");
+    const result = await runIncompleteOnboardingNudges();
+    res.json(result);
+  },
+);
+
+router.post(
+  "/admin/lifecycle/guarantee-breach/run",
+  requireAuth,
+  requireAdmin,
+  async (req: AuthRequest, res) => {
+    req.log?.info({ by: req.user?.email }, "Manual guarantee-breach run triggered");
+    const result = await runGuaranteeBreachJob();
+    res.json(result);
+  },
+);
+
+router.post(
+  "/admin/lifecycle/chase-address-confirmation/run",
+  requireAuth,
+  requireAdmin,
+  async (req: AuthRequest, res) => {
+    req.log?.info({ by: req.user?.email }, "Manual chase-address run triggered");
+    const result = await runChaseAddressConfirmation();
+    res.json(result);
+  },
+);
+
+router.post(
+  "/admin/lifecycle/winback-fails/run",
+  requireAuth,
+  requireAdmin,
+  async (req: AuthRequest, res) => {
+    req.log?.info({ by: req.user?.email }, "Manual winback-fails run triggered");
+    const result = await runWinbackFailsOffboarding();
+    res.json(result);
+  },
+);
+
+router.post(
+  "/admin/lifecycle/aging/run",
+  requireAuth,
+  requireAdmin,
+  async (req: AuthRequest, res) => {
+    req.log?.info({ by: req.user?.email }, "Manual aging cron triggered");
+    const result = await runAgingOutCron();
+    res.json(result);
+  },
+);
+
+router.post(
+  "/admin/lifecycle/finalise-cancellations/run",
+  requireAuth,
+  requireAdmin,
+  async (req: AuthRequest, res) => {
+    req.log?.info({ by: req.user?.email }, "Manual finalise-cancellations triggered");
+    const result = await runFinaliseCancellations();
+    res.json(result);
+  },
+);
+
+// ─── Lifecycle-tasks routes (list + mark complete) ───────────────────────────
+
+router.get("/lifecycle-tasks", requireAuth, async (_req: AuthRequest, res) => {
+  const { data, error } = await supabase
+    .from("lifecycle_tasks")
+    .select("*")
+    .eq("completed", false)
+    .order("created_at", { ascending: false });
+  if (error) {
+    res.status(500).json({ error: error.message });
+    return;
+  }
+  res.json(data ?? []);
+});
+
+router.patch(
+  "/lifecycle-tasks/:id/complete",
+  requireAuth,
+  async (req: AuthRequest, res) => {
+    try {
+      const id = String(req.params["id"] ?? "");
+      if (!id) { res.status(400).json({ error: "Missing task id" }); return; }
+      const completedBy = req.user?.email ?? req.user?.id ?? "unknown";
+      const { data: before } = await supabase
+        .from("lifecycle_tasks")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (!before) {
+        res.status(404).json({ error: "Task not found" });
+        return;
+      }
+      const { error } = await supabase
+        .from("lifecycle_tasks")
+        .update({
+          completed: true,
+          completed_at: new Date().toISOString(),
+          completed_by: completedBy,
+        })
+        .eq("id", id);
+      if (error) {
+        res.status(500).json({ error: error.message });
+        return;
+      }
+      await logAudit({
+        actorId: req.user?.id,
+        actorEmail: req.user?.email,
+        action: "lifecycle_task.completed",
+        entityType: "lifecycle_task",
+        entityId: id,
+        payloadBefore: before,
+        req,
+      });
+      res.json({ success: true });
+    } catch (err) {
+      req.log?.error({ err }, "Error completing lifecycle task");
+      res.status(500).json({ error: "Internal server error" });
+    }
+  },
+);
+
+export default router;

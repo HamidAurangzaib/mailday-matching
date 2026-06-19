@@ -1,0 +1,202 @@
+Here you go — the complete combined prompt:
+
+---
+
+Add the following features to the existing MailDay Matching app. These are operational enhancements to make day-to-day management intuitive and functional. Build them in the order listed.
+
+**Feature 1 — Operations Dashboard (Home Screen)**
+
+Replace the current home screen with a live operations dashboard. This is the first screen an admin or VA sees when they log in. It must update in real time — no manual refresh required.
+
+Keep the existing dashboard layout and data that is already built. Make the following additions only: add a Give a Key fund balance card to the Revenue section, add a separate Rematch Queue count card to the Matching section distinct from Total Unmatched, add a Days Until Friday card to the Matching section with a Run Matching Session button inside it, and clarify the Active Matches card to show both total active matches and matches confirmed this week as two separate numbers within the same card.
+
+Display the following sections:
+
+Member Health Summary: Total active members broken down by tier — Core, Minis, Homeschool Core, Homeschool Minis. Total active Give a Key members. Total members with billing paused.
+
+Matching Status: Number of unmatched children in the Core pool. Number of unmatched children in the Minis pool. Number of children in the Rematch Queue — displayed separately from first-time unmatched. Number of children at 18-day guarantee warning — yellow badge. Number of children at 21-day guarantee breach — red badge. Days until next Friday — calculated from today's date automatically. A prominent Run Matching Session button that opens Friday Matching Mode directly.
+
+Give a Key Status: Number of pending applications. Number of waitlisted applications. Number of receipts pending verification. Number of approved applications with Tremendous not yet sent — flagged as action required. Current fund balance.
+
+Member Risk: Number of members flagged as at-risk based on last email open date. Number of matches where pen pal has gone quiet — Days Since Match exceeds 45 and First Exchange Complete is false.
+
+Pack Delivery Status: Current month name and number. Confirmation status for this month's pack delivery — Confirmed, Pending, or Failed. Quick link to the Pack Delivery Tracker.
+
+Revenue Section: MRR, ARR, total active subscribers broken down by tier, new subscribers in last 7 days, Give a Key fund balance.
+
+Pending Actions Panel: A consolidated list of everything requiring action today — sorted by urgency. Includes guarantee breaches, receipts pending verification, Tremendous not sent, pending Give a Key applications older than 24 hours, at-risk members, and any Donations Log discrepancies flagged. If nothing is pending show a green banner: All clear. Nothing needs your attention right now.
+
+**Feature 2 — Member Health Indicators**
+
+Add a visual health status indicator to every Child record and every Parent record. The indicator displays as a colored dot — green, yellow, or red — visible in all list views and on the record itself.
+
+Health status logic for Child records:
+
+Green: Match status is Matched, last email open within 30 days, billing active, no safety flag.
+
+Yellow: Any one of the following — unmatched for more than 10 days, last email open between 30 and 60 days ago, rematch requested, billing paused.
+
+Red: Any one of the following — guarantee breach at 21 days, last email open more than 60 days ago, safety flag active, billing failed.
+
+Health status logic for Parent records:
+
+Green: All linked children are green, subscription active, no billing issues.
+
+Yellow: Any linked child is yellow, or last email open between 30 and 60 days ago.
+
+Red: Any linked child is red, subscription cancelled or paused, last email open more than 60 days ago.
+
+In all list views — Unmatched Queue, Match History, parent and child record lists — display the health dot next to each name. Allow filtering by health status in every list view. On the Operations Dashboard show a breakdown: how many green, yellow, and red members exist right now.
+
+**Feature 3 — Friday Matching Mode**
+
+Build a dedicated Friday Matching Mode that guides the admin or VA through the entire matching session as a structured step-by-step workflow. This view should feel like a guided process — not a screen full of data to interpret.
+
+The flow:
+
+Step 1 — Session Overview. Show total unmatched children in each pool. Show children at guarantee risk. Show any No Match Found flags from previous sessions. Show a Start Matching Session button. Log the session start time automatically.
+
+Step 2 — Core Pool Matching. Display unmatched Core and Homeschool Core children. Rematch children appear at the top of the queue ahead of first-time unmatched children — marked with a Rematch badge. Run Claude matching for this pool. Present each suggestion as a full card showing both children — name, age, tier, state, shared interests, Claude confidence score, and Claude reasoning. Admin sees one suggestion at a time. Approve or Reject buttons are the only actions available. Approved matches write to the Matches table immediately. Rejected matches stay in queue. Progress indicator shows how many suggestions have been reviewed out of total. Claude's prompt for rematch children must include their full previous match history so they are never suggested a previous pen pal.
+
+Step 3 — Minis Pool Matching. Same flow as Step 2 for Minis and Homeschool Minis pool.
+
+Step 4 — Session Summary. Show total matches confirmed this session. Show total children still unmatched and why — rejected suggestions, no match found, or not enough children in pool. Show any children who hit guarantee thresholds during this session. Generate a session report — formatted as a clean text summary that can be copied and sent to Courtney. Log the session end time automatically. Show a Close Session button that returns to the Operations Dashboard.
+
+The VA role can access Friday Matching Mode but cannot see mailing addresses in the match cards. Admin sees full details.
+
+**Feature 4 — Communication Log**
+
+Add a Communication Log to every Parent record. This is a chronological timeline of every automated email that has fired to this parent via Klaviyo, plus any manual notes added by admin or VA.
+
+Automated entries — created automatically when a webhook fires: Entry type, email subject line, date and time sent, trigger that caused it — for example Match Confirmed or Pack Delivery Month 3.
+
+Manual entries — added by admin or VA at any time: Free text note, date-stamped automatically, author initials required before saving.
+
+The log displays in reverse chronological order — newest first. It is visible to Admin at all times. VA can view and add manual entries but cannot see entries related to billing or financial actions.
+
+On each log entry include a status field — Sent, Failed, or Manually Sent. If a Klaviyo webhook fires but returns an error mark the entry as Failed and surface it as a pending action on the Operations Dashboard.
+
+Add a quick-add note button to every record so admin or VA can log a note in under 10 seconds without opening the full record.
+
+**Feature 5 — Rematch Request Queue**
+
+Add a dedicated Rematch Request Queue as a separate view in the left navigation under Matching. This queue shows only children with match_status = Rematch Requested.
+
+Display: Child name, age, tier, state, original match date, close date, close reason, days since rematch requested, guarantee countdown badge using the reset match_guarantee_start_date.
+
+Sort by days since rematch requested — longest waiting first.
+
+In Friday Matching Mode — Step 2 and Step 3 — rematch children appear at the top of their pool's queue ahead of first-time unmatched children. They are prioritized automatically. A Rematch badge displays on their card so the admin knows this child previously had a pen pal.
+
+Claude's matching prompt for rematch children must include their previous match history so they are never suggested the same pen pal again. The prompt should note this is a rematch and ask Claude to be especially thoughtful about the suggestion.
+
+On the Operations Dashboard the Rematch Request Queue count appears separately from the general unmatched count so the two are never confused.
+
+**Feature 6 — Pack Delivery Tracker**
+
+Add a Pack Delivery Tracker to the left navigation under Operations. This tool tracks monthly pack delivery confirmation for every active member.
+
+Structure: One row per month per active member cohort. Columns: Month name and number, total active members at send time, delivery emails confirmed sent, delivery emails failed, manually resent, confirmation status.
+
+Confirmation status options: Pending — emails not yet sent this month. Sent — all active members received delivery email. Partial — some failures logged. Confirmed — admin has manually verified all failures were resolved.
+
+On the first of every month the tracker automatically creates a new row for the current month using the current active member count. It marks status as Pending until the Klaviyo delivery webhook confirms emails fired. When all delivery emails confirm as sent it updates to Sent automatically.
+
+If any delivery email fails the tracker marks the row as Partial, logs which member records failed, and surfaces them as a pending action on the Operations Dashboard.
+
+Admin can manually mark individual failures as resolved and add a note explaining what was done — for example manually resent on 05/15 with apology note.
+
+A history of all previous months is preserved and viewable. Filter by month. Export as CSV.
+
+**Feature 7 — Member Notes Timeline**
+
+Replace the single internal notes text field on every Parent and Child record with a structured chronological activity timeline.
+
+Each entry in the timeline contains: date and time — auto-stamped, author initials — required, entry type — Manual Note, System Event, Billing Event, Match Event, or Customer Service, and note text — free form.
+
+System events are created automatically for: record created, match confirmed, match closed, rematch requested, billing paused, billing resumed, at-risk flag set, safety flag set, Give a Key recipient status set.
+
+Manual notes are added by admin or VA using a quick-add panel that appears without leaving the record. Author initials are required before saving. Format for manual notes follows the existing handbook convention — date, initials, note text.
+
+The timeline displays in reverse chronological order. Filter by entry type. The full timeline is visible to Admin. VA can see Manual Notes and Match Events only — Billing Events are hidden from VA role.
+
+Migrate any existing internal notes text into the timeline as a single Manual Note entry dated at record creation marked as Migrated from previous notes field.
+
+**Feature 8 — Cancellation Tracker**
+
+When a member's subscription status changes to Cancelled in the database — triggered by ReCharge webhook — automatically: flag the record on the Operations Dashboard as a new cancellation requiring review, create a system event in the Member Notes Timeline, and open a cancellation record in the Cancellation Tracker.
+
+The Cancellation Tracker lives in the left navigation under Operations. It shows all cancelled members with: member name, tier, join date, cancellation date, tenure in months, cancellation reason if provided by ReCharge, and an admin notes field.
+
+Cancellation reason categories — admin selects the closest match when reviewing: Price, No letter exchange with pen pal, Wrong match, Life circumstances, Moving, Found alternative, Unknown. If ReCharge passes a reason map it to these categories automatically where possible.
+
+On the Operations Dashboard show: cancellations this month, cancellations this quarter, top cancellation reason this quarter.
+
+Add a Cancellation Trends view inside the Cancellation Tracker: a chart showing cancellations by month over time, a chart showing cancellation reasons as a percentage breakdown, average tenure at cancellation by tier. This data is Admin only — never visible to VA.
+
+Add a Save Member flag to each cancellation record. When flagged it creates a pending action on the Operations Dashboard: this member cancelled — consider a save outreach. Admin decides whether to reach out. The app does not automate any outreach — it only surfaces the flag.
+
+**Feature 9 — Influencer and Affiliate Tracker**
+
+Add an Influencer Tracker to the left navigation under Growth. This replaces any existing Airtable influencer tracking.
+
+Each influencer record contains: first name, last name, Instagram handle, TikTok handle, platform — Instagram, TikTok, Both, Other, follower count, tier — Nano under 10K, Micro 10K-100K, Mid 100K-500K, Macro 500K plus, affiliate code — unique per influencer, affiliate link, clicks — pulled via webhook if available or entered manually, conversions — members who joined using this code, commission rate percentage, commission owed — calculated automatically from conversions multiplied by membership price multiplied by commission rate, commission paid to date, last outreach date, outreach status — Not contacted, Contacted, Responded, Active Partner, Declined, Ghosted, partnership notes, content posted — list of URLs to any content they have posted, and internal notes timeline same as member records.
+
+Views inside the Influencer Tracker: All influencers — full list filterable by platform, tier, and status. Active Partners — only influencers with status Active Partner. Top Performers — sorted by conversions descending. Commission Due — influencers with commission owed greater than zero who have not been fully paid. Outreach Queue — influencers with status Not Contacted or Contacted, sorted by follower count descending.
+
+On the Operations Dashboard show: total active affiliate partners, total conversions from affiliate codes this month, total commission owed.
+
+Access: Admin only. VA does not see the Influencer Tracker.
+
+**Feature 10 — Global Search**
+
+Add a persistent global search bar to the top of every screen in the app. It is always visible regardless of which view is active.
+
+Search must return results across: Parent records — by first name, last name, email, and phone. Child records — by first name. Match records — by either child's name. Give a Key applications — by parent name, child name, and email. Influencer records — by name and handle.
+
+Results display in a dropdown grouped by record type — Parents, Children, Matches, Give a Key, Influencers. Each result shows the record name, type, and one identifying detail — email for parents, age and tier for children, match date for matches.
+
+Clicking a result opens that record directly regardless of which section of the app you are currently in.
+
+Search must return results within one second. It searches as you type — no need to press enter. Minimum two characters before search fires.
+
+VA role sees results for Parents, Children, and Matches only. Give a Key application details and Influencer records are hidden from search results for VA.
+
+**Navigation — replace the current sidebar entirely with this structure:**
+
+Global search bar at the very top of the sidebar — persistent across all views, always visible, searches across all record types as specified in Feature 10.
+
+Dashboard home screen directly below the search bar.
+
+Action Items with badge count directly below Dashboard — always visible regardless of role.
+
+MATCHING section: Unmatched Queue, Rematch Queue, Match Session, Match History
+
+MEMBERS section: Children, Parents, Incomplete Onboarding
+
+GIVE A KEY section: Dashboard, Applications, Waitlist, Receipts, Donations
+
+OPERATIONS section: Pack Delivery Tracker, Cancellation Tracker
+
+GROWTH section: Influencer Tracker
+
+ADMIN section: User Management
+
+Remove Team Performance from the navigation entirely until that feature is fully built and populated with real data. Hide it from both Admin and VA roles for now.
+
+Apply the correct role-based visibility to the navigation: VA role sees Matching, Members, and Give a Key sections only — Applications and Waitlist within Give a Key visible to VA, Donations and Receipts hidden from VA. VA does not see Operations, Growth, or Admin sections. Admin sees everything.
+
+**Build order:**
+1. Global Search — Feature 10 — foundational, needed everywhere
+2. Member Notes Timeline — Feature 7 — replaces existing notes field, needed before other features log to it
+3. Member Health Indicators — Feature 2 — needed in all list views
+4. Navigation restructure — update sidebar to match the structure above
+5. Operations Dashboard updates — Feature 1 — pulls from all other features
+6. Friday Matching Mode — Feature 3
+7. Rematch Request Queue — Feature 5
+8. Communication Log — Feature 4
+9. Pack Delivery Tracker — Feature 6
+10. Cancellation Tracker — Feature 8
+11. Influencer and Affiliate Tracker — Feature 9
+
+Before building any frontend for each feature show me the database schema changes required and ask me to confirm before proceeding. Some features require new tables, some require new fields on existing tables, and some are frontend only with no schema changes. Identify which is which before you start.

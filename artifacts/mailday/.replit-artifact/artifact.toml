@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "MailDay Matching"
+version = "1.0.0"
+id = "artifacts/mailday"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21780
+
+[services.development]
+run = "pnpm --filter @workspace/mailday run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/mailday", "run", "build" ]
+publicDir = "artifacts/mailday/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21780"
+BASE_PATH = "/"
