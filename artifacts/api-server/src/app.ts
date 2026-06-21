@@ -3,6 +3,9 @@ import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import pinoHttp from "pino-http";
+import path from "node:path";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import router from "./routes";
 import { logger } from "./lib/logger";
 
@@ -87,5 +90,26 @@ app.use("/api/auth/forgot-password", passwordOpsLimiter);
 app.use("/api/auth/reset-password", passwordOpsLimiter);
 app.use("/api/auth/me/password", passwordOpsLimiter);
 app.use("/api", router);
+
+// Serve the built admin dashboard (SPA) from this same server, so ONE address
+// (e.g. app.joinmailday.com) serves both the dashboard and the /api engine.
+// Because the UI is then same-origin with the API, the frontend's /api calls
+// need no CORS. Resolved relative to this bundle's location (cwd-independent),
+// overridable via CLIENT_DIST_PATH. Falls back to API-only if no build present.
+const clientDist =
+  process.env["CLIENT_DIST_PATH"] ??
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../mailday/dist/public");
+
+if (fs.existsSync(path.join(clientDist, "index.html"))) {
+  app.use(express.static(clientDist));
+  // SPA fallback: any non-/api GET that isn't a real static file → index.html,
+  // so client-side routes (e.g. /login, /children) load correctly on refresh.
+  app.get(/^\/(?!api\/).*/, (_req, res) => {
+    res.sendFile(path.join(clientDist, "index.html"));
+  });
+  logger.info({ clientDist }, "Serving admin dashboard (SPA) from this server");
+} else {
+  logger.warn({ clientDist }, "Frontend build not found — running API-only");
+}
 
 export default app;
