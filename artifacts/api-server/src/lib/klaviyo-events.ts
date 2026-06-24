@@ -25,7 +25,8 @@ export type KlaviyoEventName =
   | "family_subscribed"            // Phase 2.1 — drives K1 Welcome (Day 0)
   | "match_promoted_to_active"     // Phase 2.5 — drives K2 First-letter nudge (Day 14)
   | "family_offboarded"            // Phase 4.2 — drives K7 Day-30 win-back
-  | "gak_donation_recorded";       // Phase 6.2 — drives K9 GAK donor thank-you
+  | "gak_donation_recorded"        // Phase 6.2 — drives K9 GAK donor thank-you
+  | "pack_due";                    // Phase 7 — drives K3/K4/K5 monthly pack (per child, per month)
 
 export interface EmitKlaviyoEventArgs {
   /** The event name Klaviyo flows listen for (Metric name). */

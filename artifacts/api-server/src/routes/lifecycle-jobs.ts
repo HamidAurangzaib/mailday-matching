@@ -23,6 +23,8 @@ import { logAudit } from "../lib/audit.js";
 import { differenceInDays, parseISO } from "date-fns";
 import { tierChangeOnAging, isCrossTier } from "../lib/age.js";
 import { offboardFamily } from "../lib/lifecycle.js";
+import { emitKlaviyoEvent } from "../lib/klaviyo-events.js";
+import { computeSubscriptionMonth } from "../lib/subscription.js";
 
 const router: IRouter = Router();
 
@@ -724,12 +726,116 @@ export async function runAgingOutCron(): Promise<AgingResult> {
 
 // ─── Cron scheduler ──────────────────────────────────────────────────────────
 
+// ─── Monthly pack-due cron (Phase 7) ────────────────────────────────────────
+//
+// On the 1st of every month, fire a `pack_due` Klaviyo event PER ACTIVE CHILD
+// with { tier, subscription_month, child_first_name }. Klaviyo's per-tier flows
+// then conditional-split on subscription_month to send the right pack email at
+// 8am the recipient's local time.
+//
+// Product rules (Courtney, confirmed):
+//   • PER CHILD — one event per active child, counted from that child's own
+//     created_date (a later-added sibling starts at their own Month 1).
+//   • subscription_month keeps incrementing past 12 (Year 2 = Month 13+).
+//   • Only active subscribers (parents.subscription_status = 'Active').
+//   • Skip a child whose subscription_month < 1 (hasn't reached their first
+//     1st-of-month yet — no pack due).
+//
+// Idempotency: the schedule (once on the 1st) is the dedup. The manual endpoint
+// supports dryRun so testing never double-fires real events.
+interface PackDueResult {
+  dryRun: boolean;
+  scanned: number;            // active children examined
+  fired: number;              // pack_due events emitted (counted in dryRun too)
+  skippedNoPackYet: number;   // subscription_month < 1
+  errors: string[];
+  fires: Array<{ child_first_name: string; tier: string; subscription_month: number; parent_email: string }>;
+}
+
+export async function runPackDueCron(
+  opts: { dryRun?: boolean; asOf?: Date } = {},
+): Promise<PackDueResult> {
+  const dryRun = opts.dryRun ?? false;
+  const asOf = opts.asOf ?? new Date();
+  const result: PackDueResult = {
+    dryRun, scanned: 0, fired: 0, skippedNoPackYet: 0, errors: [], fires: [],
+  };
+
+  // 1. Active subscribers.
+  const { data: activeParents, error: pErr } = await supabase
+    .from("parents")
+    .select("id, first_name, last_name, email, subscription_status")
+    .eq("subscription_status", "Active");
+  if (pErr) { result.errors.push(`parents query: ${pErr.message}`); return result; }
+  const parentMap = new Map((activeParents ?? []).map((p) => [p.id, p]));
+  const activeIds = [...parentMap.keys()];
+  if (activeIds.length === 0) {
+    logger.info({ ...result }, "pack_due cron: no active subscribers");
+    return result;
+  }
+
+  // 2. Their children (each child gets its own pack on its own month counter).
+  const { data: children, error: cErr } = await supabase
+    .from("children")
+    .select("id, child_first_name, tier, created_date, parent_id")
+    .in("parent_id", activeIds);
+  if (cErr) { result.errors.push(`children query: ${cErr.message}`); return result; }
+
+  for (const child of children ?? []) {
+    result.scanned++;
+    const parent = parentMap.get(child.parent_id as string);
+    if (!parent?.email) { result.errors.push(`child ${child.id}: parent has no email`); continue; }
+    if (!child.created_date) { result.errors.push(`child ${child.id}: no created_date`); continue; }
+
+    const month = computeSubscriptionMonth(child.created_date as string, asOf);
+    if (month < 1) { result.skippedNoPackYet++; continue; }
+
+    result.fires.push({
+      child_first_name: child.child_first_name as string,
+      tier: child.tier as string,
+      subscription_month: month,
+      parent_email: parent.email as string,
+    });
+
+    if (dryRun) { result.fired++; continue; }
+
+    try {
+      const emit = await emitKlaviyoEvent({
+        event: "pack_due",
+        profile: {
+          email: parent.email as string,
+          first_name: (parent.first_name as string | null) ?? undefined,
+          last_name: (parent.last_name as string | null) ?? undefined,
+        },
+        properties: {
+          child_id: child.id,
+          child_first_name: child.child_first_name,
+          tier: child.tier,
+          subscription_month: month,
+        },
+        time: asOf,
+      });
+      if (emit.ok) result.fired++;
+      else result.errors.push(`emit failed (${parent.email} / ${child.child_first_name}): ${emit.error ?? emit.status}`);
+    } catch (e) {
+      result.errors.push(`emit threw for child ${child.id}: ${String(e)}`);
+    }
+  }
+
+  logger.info(
+    { dryRun, scanned: result.scanned, fired: result.fired, skippedNoPackYet: result.skippedNoPackYet, errorCount: result.errors.length },
+    dryRun ? "pack_due cron complete (DRY RUN — nothing emitted)" : "pack_due cron complete",
+  );
+  return result;
+}
+
 let nudgeJob: ReturnType<typeof cron.schedule> | null = null;
 let breachJob: ReturnType<typeof cron.schedule> | null = null;
 let chaseAddressJob: ReturnType<typeof cron.schedule> | null = null;
 let winbackFailsJob: ReturnType<typeof cron.schedule> | null = null;
 let agingJob: ReturnType<typeof cron.schedule> | null = null;
 let finaliseCancellationsJob: ReturnType<typeof cron.schedule> | null = null;
+let packDueJob: ReturnType<typeof cron.schedule> | null = null;
 
 /** Start both daily lifecycle crons at 9 AM Mountain. */
 export function startLifecycleCrons(): void {
@@ -788,8 +894,18 @@ export function startLifecycleCrons(): void {
     },
     { timezone: "America/Denver" },
   );
+  // Monthly packs: 00:30 MT on the 1st of every month. Fired early so Klaviyo
+  // receives the pack_due events at the start of the day and can hold each email
+  // until 8am in the recipient's own timezone.
+  packDueJob = cron.schedule(
+    "30 0 1 * *",
+    () => {
+      void runPackDueCron().catch((err) => logger.error({ err }, "pack_due cron failed"));
+    },
+    { timezone: "America/Denver" },
+  );
   logger.info(
-    "Lifecycle crons scheduled (9:00, 9:05, 9:10, 9:15, 9:20 daily + finalise every 4h — America/Denver)",
+    "Lifecycle crons scheduled (9:00, 9:05, 9:10, 9:15, 9:20 daily + finalise every 4h + pack_due 00:30 on the 1st — America/Denver)",
   );
 }
 
@@ -800,12 +916,14 @@ export function stopLifecycleCrons(): void {
   winbackFailsJob?.stop();
   agingJob?.stop();
   finaliseCancellationsJob?.stop();
+  packDueJob?.stop();
   nudgeJob = null;
   breachJob = null;
   chaseAddressJob = null;
   winbackFailsJob = null;
   agingJob = null;
   finaliseCancellationsJob = null;
+  packDueJob = null;
 }
 
 // ─── App-URL helper (mirrors the one in webhooks.ts; kept local to avoid extra import surface) ─
@@ -860,6 +978,20 @@ router.post(
   async (req: AuthRequest, res) => {
     req.log?.info({ by: req.user?.email }, "Manual winback-fails run triggered");
     const result = await runWinbackFailsOffboarding();
+    res.json(result);
+  },
+);
+
+// Monthly pack_due — manual trigger. Pass ?dryRun=true to compute + preview the
+// per-child pack months WITHOUT emitting any Klaviyo events (safe for testing).
+router.post(
+  "/admin/lifecycle/pack-due/run",
+  requireAuth,
+  requireAdmin,
+  async (req: AuthRequest, res) => {
+    const dryRun = req.query["dryRun"] === "true" || req.body?.dryRun === true;
+    req.log?.info({ by: req.user?.email, dryRun }, "Manual pack_due run triggered");
+    const result = await runPackDueCron({ dryRun });
     res.json(result);
   },
 );
