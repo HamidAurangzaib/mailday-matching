@@ -12,6 +12,12 @@ import { logger } from "../lib/logger.js";
  * `review_tier_mismatch` task. Per the lifecycle map, the app NEVER
  * auto-dissolves — only a human decides.
  */
+// NOTE (Phase 8): currently unreferenced. Its previous caller — the block that
+// rewrote every child's tier from the parent's tier on a Shopify tier change —
+// was removed, because a child's tier now comes from the membership purchased
+// for them. Kept because the forthcoming "upgrade an existing child's
+// membership" flow will need exactly this cross-tier review check.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function flagAffectedMatchesAsCrossTier(parentId: string, source: string): Promise<void> {
   const { data: kids } = await supabase
     .from("children")
@@ -92,15 +98,95 @@ function appBaseUrl(): string {
 
 // ─── Shopify order helpers ────────────────────────────────────────────────────
 
+/** Classify a single line item into a tier, or null if it isn't a membership. */
+function tierFromLineItem(item: { title?: string; name?: string; variant_title?: string }): string | null {
+  const text = `${item.title || ""} ${item.name || ""} ${item.variant_title || ""}`.toLowerCase();
+  if (text.includes("minis") && text.includes("homeschool")) return "Homeschool Minis";
+  if (text.includes("core") && text.includes("homeschool")) return "Homeschool Core";
+  if (text.includes("minis")) return "Minis";
+  if (text.includes("core")) return "Core";
+  return null;
+}
+
+/**
+ * Phase 8: an order can contain MORE THAN ONE membership, at different tiers
+ * (e.g. 1× Homeschool Core + 1× Minis). Expand every membership line item into
+ * one slot per quantity, so each child can later claim exactly what was paid for.
+ *
+ * The old inferTier() returned only the FIRST match for the whole order, which
+ * silently discarded every additional child's membership.
+ */
+export function parseMembershipSlots(
+  lineItems: Array<{ title?: string; name?: string; variant_title?: string; quantity?: number }>,
+): Array<{ tier: string; billing_type: string }> {
+  const slots: Array<{ tier: string; billing_type: string }> = [];
+  for (const item of lineItems) {
+    const tier = tierFromLineItem(item);
+    if (!tier) continue; // not a membership line (e.g. a donation or add-on)
+    const billing_type = inferBillingType([item]);
+    const qty = Math.max(1, Number(item.quantity) || 1);
+    for (let i = 0; i < qty; i++) slots.push({ tier, billing_type });
+  }
+  return slots;
+}
+
+/**
+ * Legacy summary tier for `parents.membership_tier` — kept because reporting,
+ * segments and the Klaviyo profile still read it. It is NO LONGER the source of
+ * truth for any child's tier; membership_slots is.
+ */
 function inferTier(lineItems: Array<{ title?: string; name?: string; variant_title?: string }>): string {
   for (const item of lineItems) {
-    const text = `${item.title || ""} ${item.name || ""} ${item.variant_title || ""}`.toLowerCase();
-    if (text.includes("minis") && text.includes("homeschool")) return "Homeschool Minis";
-    if (text.includes("core") && text.includes("homeschool")) return "Homeschool Core";
-    if (text.includes("minis")) return "Minis";
-    if (text.includes("core")) return "Core";
+    const tier = tierFromLineItem(item);
+    if (tier) return tier;
   }
   return "Core";
+}
+
+/**
+ * Persist one membership_slots row per purchased membership.
+ * Idempotent per Shopify order: if this order already created slots for this
+ * parent we skip, so a webhook retry can never hand a family extra memberships.
+ */
+async function createMembershipSlots(
+  parentId: string,
+  shopifyOrderId: number | undefined,
+  slots: Array<{ tier: string; billing_type: string }>,
+  req?: { log?: { info?: (o: unknown, m: string) => void; error?: (o: unknown, m: string) => void } },
+): Promise<number> {
+  if (slots.length === 0) return 0;
+  const orderId = shopifyOrderId != null ? String(shopifyOrderId) : null;
+
+  if (orderId) {
+    const { data: already } = await supabase
+      .from("membership_slots")
+      .select("id")
+      .eq("parent_id", parentId)
+      .eq("shopify_order_id", orderId)
+      .limit(1);
+    if (already && already.length > 0) {
+      req?.log?.info?.({ parentId, orderId }, "membership slots already created for this order — skipping");
+      return 0;
+    }
+  }
+
+  const rows = slots.map((s) => ({
+    parent_id: parentId,
+    tier: s.tier,
+    billing_type: s.billing_type,
+    shopify_order_id: orderId,
+    source: "shopify",
+  }));
+  const { error } = await supabase.from("membership_slots").insert(rows);
+  if (error) {
+    req?.log?.error?.({ error, parentId, orderId }, "Failed to create membership slots");
+    return 0;
+  }
+  req?.log?.info?.(
+    { parentId, orderId, count: rows.length, tiers: rows.map((r) => r.tier) },
+    "Membership slots created",
+  );
+  return rows.length;
 }
 
 function inferBillingType(lineItems: Array<{ title?: string }>): string {
@@ -133,9 +219,10 @@ router.post("/webhooks/shopify/orders", async (req: RawRequest, res) => {
 
   try {
     const order = req.body as {
+      id?: number;
       customer?: { id?: number; email?: string; first_name?: string; last_name?: string; phone?: string };
       billing_address?: { province_code?: string; address1?: string; address2?: string; city?: string; zip?: string };
-      line_items?: Array<{ title?: string; name?: string; variant_title?: string }>;
+      line_items?: Array<{ title?: string; name?: string; variant_title?: string; quantity?: number }>;
     };
 
     const customer = order.customer;
@@ -144,6 +231,10 @@ router.post("/webhooks/shopify/orders", async (req: RawRequest, res) => {
       return;
     }
 
+    // Phase 8: every membership on the order becomes its own slot, so a family
+    // buying e.g. Homeschool Core + Minis gets BOTH — not just the first one.
+    const membershipSlots = parseMembershipSlots(order.line_items || []);
+    // Legacy summary field only; no child's tier is derived from this any more.
     const tier = inferTier(order.line_items || []);
     const billing_type = inferBillingType(order.line_items || []);
     const ba = order.billing_address;
@@ -159,17 +250,6 @@ router.post("/webhooks/shopify/orders", async (req: RawRequest, res) => {
       .single();
 
     if (existing) {
-      // Phase 3.5: detect a tier change. The parent's membership_tier and the
-      // child's tier are stored separately but conceptually linked. When the
-      // parent switches tier in Shopify, propagate to all their children.
-      const { data: oldParent } = await supabase
-        .from("parents")
-        .select("membership_tier")
-        .eq("id", existing.id)
-        .single();
-      const oldTier = (oldParent?.membership_tier as string | null) ?? null;
-      const tierChanged = oldTier !== tier;
-
       await supabase.from("parents").update({
         shopify_customer_id: customer.id?.toString(),
         membership_tier: tier,
@@ -179,27 +259,14 @@ router.post("/webhooks/shopify/orders", async (req: RawRequest, res) => {
         mailing_address: mailing_address || undefined,
       }).eq("id", existing.id);
 
-      if (tierChanged) {
-        // Apply the new tier to all this parent's children. Preserve each
-        // child's homeschool-ness from the tier name.
-        const { data: kids } = await supabase
-          .from("children")
-          .select("id, tier")
-          .eq("parent_id", existing.id);
-        for (const child of kids ?? []) {
-          const isHomeschool = typeof child.tier === "string" && child.tier.startsWith("Homeschool");
-          const targetTier = isHomeschool
-            ? tier.startsWith("Homeschool") ? tier : `Homeschool ${tier}`
-            : tier.startsWith("Homeschool") ? tier.replace("Homeschool ", "") : tier;
-          if (targetTier !== child.tier) {
-            await supabase.from("children").update({ tier: targetTier }).eq("id", child.id);
-          }
-        }
-
-        // Phase 3.6: any Active match this parent's children are in may now be
-        // cross-tier. Flag for admin review (no automatic dissolution).
-        await flagAffectedMatchesAsCrossTier(existing.id, "Shopify tier change");
-      }
+      // Phase 8: a returning subscriber placing another order has bought MORE
+      // memberships (e.g. adding a second child) — record each as its own slot.
+      //
+      // NOTE: we deliberately no longer rewrite existing children's tiers from
+      // the parent's tier. A child's tier is whatever membership was purchased
+      // for them; forcing the family's tier onto every child is exactly what
+      // produced the "paid for Minis, got Homeschool Minis" bug.
+      await createMembershipSlots(existing.id, order.id, membershipSlots, req);
 
       // Phase 2.1: emit `family_subscribed` so Klaviyo's K1 Welcome flow can
       // fire with the existing onboarding URL. For a returning subscriber this
@@ -251,6 +318,10 @@ router.post("/webhooks/shopify/orders", async (req: RawRequest, res) => {
       res.status(200).json({ received: true, error: "Failed to create parent" });
       return;
     }
+
+    // Phase 8: record every purchased membership so each child can claim exactly
+    // what was paid for during onboarding.
+    await createMembershipSlots(parent.id as string, order.id, membershipSlots, req);
 
     // Phase 2.1: emit `family_subscribed` so Klaviyo's K1 Welcome flow can
     // fire with the just-issued onboarding token. Fire-and-forget — a Klaviyo

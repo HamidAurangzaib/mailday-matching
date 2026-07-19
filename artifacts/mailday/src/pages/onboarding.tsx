@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useSearch } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { customFetch } from "@workspace/api-client-react";
@@ -32,12 +32,20 @@ const DOB_MAX = new Date(new Date().getFullYear() - 1, 11, 31).toISOString().spl
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+interface Membership {
+  id: string;
+  tier: string;
+}
+
 interface Parent {
   id: string;
   first_name: string;
   last_name: string;
   email: string;
   membership_tier: string | null;
+  /** Memberships this family purchased and hasn't assigned to a child yet. */
+  available_memberships?: Membership[];
+  memberships_remaining?: number;
 }
 
 interface ChildForm {
@@ -73,18 +81,74 @@ function calcAge(dob: string): number | null {
   return age >= 1 && age <= 18 ? age : null;
 }
 
+const ALL_TIER_VALUES = TIERS.map((t) => t.value);
+
+/**
+ * Which memberships THIS child can still choose from: everything the family
+ * purchased, minus the ones the family's other children have already taken.
+ * Families with no recorded purchase (pre-existing accounts) can pick any tier.
+ */
+function tiersAvailableFor(
+  purchasedTiers: string[],
+  allChildren: ChildForm[],
+  currentUid: string,
+): string[] {
+  if (purchasedTiers.length === 0) return ALL_TIER_VALUES;
+  const pool = [...purchasedTiers];
+  for (const c of allChildren) {
+    if (c.uid === currentUid) continue;
+    const i = pool.indexOf(c.tier);
+    if (i >= 0) pool.splice(i, 1);
+  }
+  return [...new Set(pool)];
+}
+
+/** Age-based suggestion, limited to what's actually available (3–5 → Minis). */
+function bestTierForAge(available: string[], age: number | null): string | undefined {
+  if (available.length === 0) return undefined;
+  if (age === null) return available[0];
+  const wantMinis = age <= 5;
+  return available.find((t) => t.endsWith("Minis") === wantMinis) ?? available[0];
+}
+
 // ─── Child Form Section ───────────────────────────────────────────────────────
 
 interface ChildSectionProps {
   child: ChildForm;
   index: number;
   total: number;
+  availableTiers: string[];
+  constrainedToPurchase: boolean;
   onChange: (uid: string, updates: Partial<ChildForm>) => void;
   onRemove: (uid: string) => void;
 }
 
-function ChildSection({ child, index, total, onChange, onRemove }: ChildSectionProps) {
+function ChildSection({
+  child, index, total, availableTiers, constrainedToPurchase, onChange, onRemove,
+}: ChildSectionProps) {
   const age = useMemo(() => calcAge(child.date_of_birth), [child.date_of_birth]);
+
+  // Mirror the /start form: entering the birthday auto-selects the right plan,
+  // and the parent can still override by tapping another one.
+  useEffect(() => {
+    if (!child.date_of_birth) return;
+    const suggested = bestTierForAge(availableTiers, age);
+    if (suggested && suggested !== child.tier) {
+      onChange(child.uid, { tier: suggested });
+    }
+    // Only re-suggest when the birthday changes — never fight a manual override.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [child.date_of_birth]);
+
+  // If another child took the membership this one had selected, fall back.
+  useEffect(() => {
+    if (availableTiers.length > 0 && !availableTiers.includes(child.tier)) {
+      onChange(child.uid, { tier: bestTierForAge(availableTiers, age) ?? availableTiers[0] });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availableTiers.join("|")]);
+
+  const tierOptions = TIERS.filter((t) => availableTiers.includes(t.value));
 
   const toggleInterest = (interest: string) => {
     const prev = child.interests;
@@ -176,26 +240,41 @@ function ChildSection({ child, index, total, onChange, onRemove }: ChildSectionP
             )}
           </div>
 
-          {/* Tier */}
+          {/* Tier — limited to the memberships this family purchased */}
           <div className="space-y-2">
             <Label>Subscription Plan</Label>
-            <div className="grid grid-cols-2 gap-2">
-              {TIERS.map((t) => (
-                <button
-                  key={t.value}
-                  type="button"
-                  onClick={() => onChange(child.uid, { tier: t.value })}
-                  className={`p-3 rounded-lg border-2 text-left transition-all ${
-                    child.tier === t.value
-                      ? "border-[#DD4B39] bg-[#DD4B39]/5"
-                      : "border-gray-200 hover:border-gray-300"
-                  }`}
-                >
-                  <div className="font-medium text-sm">{t.label}</div>
-                  <div className="text-xs text-gray-500">{t.age}</div>
-                </button>
-              ))}
-            </div>
+            {tierOptions.length === 0 ? (
+              <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                All of your memberships have been assigned to your other children.
+              </p>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  {tierOptions.map((t) => (
+                    <button
+                      key={t.value}
+                      type="button"
+                      onClick={() => onChange(child.uid, { tier: t.value })}
+                      className={`p-3 rounded-lg border-2 text-left transition-all ${
+                        child.tier === t.value
+                          ? "border-[#DD4B39] bg-[#DD4B39]/5"
+                          : "border-gray-200 hover:border-gray-300"
+                      }`}
+                    >
+                      <div className="font-medium text-sm">{t.label}</div>
+                      <div className="text-xs text-gray-500">{t.age}</div>
+                    </button>
+                  ))}
+                </div>
+                {constrainedToPurchase && (
+                  <p className="text-xs text-gray-500">
+                    {tierOptions.length === 1
+                      ? "This is the membership you purchased for this child."
+                      : "We've suggested a plan based on their age — tap another to change it."}
+                  </p>
+                )}
+              </>
+            )}
           </div>
 
           {/* Interests */}
@@ -254,8 +333,27 @@ export default function Onboarding() {
     retry: false,
   });
 
+  // Phase 8: the memberships this family actually bought. Empty for accounts
+  // created before we tracked purchases — those keep the old "any tier" flow.
+  const purchasedTiers = useMemo(
+    () => (parent?.available_memberships ?? []).map((m) => m.tier),
+    [parent],
+  );
+  const constrainedToPurchase = purchasedTiers.length > 0;
+
   const defaultTier = parent?.membership_tier || "Core";
   const [children, setChildren] = useState<ChildForm[]>([newChild(defaultTier)]);
+
+  // Once the purchase loads, seed the first child with a membership they own.
+  useEffect(() => {
+    if (!constrainedToPurchase) return;
+    setChildren((prev) =>
+      prev.length === 1 && !prev[0].date_of_birth && !purchasedTiers.includes(prev[0].tier)
+        ? [{ ...prev[0], tier: purchasedTiers[0] }]
+        : prev,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [constrainedToPurchase, purchasedTiers.join("|")]);
   const [submitting, setSubmitting] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [submitted, setSubmitted] = useState(false);
@@ -270,12 +368,18 @@ export default function Onboarding() {
     setChildren((prev) => prev.filter((c) => c.uid !== uid));
   };
 
+  // A family can only enrol as many children as memberships they purchased.
+  const canAddChild = !constrainedToPurchase || children.length < purchasedTiers.length;
+
   const addChild = () => {
-    const tier = parent?.membership_tier || "Core";
-    setChildren((prev) => [
-      ...prev.map((c) => ({ ...c, expanded: false })),
-      newChild(tier),
-    ]);
+    if (!canAddChild) return;
+    setChildren((prev) => {
+      const remaining = tiersAvailableFor(purchasedTiers, prev, "");
+      const tier = constrainedToPurchase
+        ? remaining[0] ?? purchasedTiers[0]
+        : parent?.membership_tier || "Core";
+      return [...prev.map((c) => ({ ...c, expanded: false })), newChild(tier)];
+    });
   };
 
   const canSubmit = children.every((c) => {
@@ -291,6 +395,7 @@ export default function Onboarding() {
 
     const succeeded: string[] = [];
     const failed: string[] = [];
+    let firstErrorMessage: string | null = null;
 
     for (const child of children) {
       try {
@@ -304,17 +409,30 @@ export default function Onboarding() {
           }),
         });
         succeeded.push(child.child_first_name.trim());
-      } catch {
+      } catch (err) {
         failed.push(child.child_first_name.trim());
+        if (!firstErrorMessage && err instanceof Error && err.message) {
+          firstErrorMessage = err.message;
+        }
       }
       setProgress((p) => ({ ...p, done: p.done + 1 }));
     }
 
-    if (succeeded.length > 0) {
+    if (succeeded.length > 0 && failed.length === 0) {
       setSubmittedNames(succeeded);
       setSubmitted(true);
+    } else if (succeeded.length > 0) {
+      // Partial success — say exactly who didn't save so nobody is silently lost.
+      setSubmittedNames(succeeded);
+      setSubmitted(true);
+      setGlobalError(
+        `We saved ${succeeded.join(", ")}, but couldn't save ${failed.join(", ")}. ${firstErrorMessage ?? ""}`.trim(),
+      );
     } else {
-      setGlobalError("Something went wrong. Please try again or contact us if the problem continues.");
+      setGlobalError(
+        firstErrorMessage ??
+          "Something went wrong. Please try again or contact us if the problem continues.",
+      );
     }
     setSubmitting(false);
   };
@@ -428,21 +546,39 @@ export default function Onboarding() {
               child={child}
               index={i}
               total={children.length}
+              availableTiers={tiersAvailableFor(purchasedTiers, children, child.uid)}
+              constrainedToPurchase={constrainedToPurchase}
               onChange={updateChild}
               onRemove={removeChild}
             />
           ))}
         </div>
 
-        {/* Add another child */}
-        <button
-          type="button"
-          onClick={addChild}
-          className="w-full py-3 border-2 border-dashed border-[#DD4B39]/40 rounded-xl text-[#DD4B39] text-sm font-medium hover:border-[#DD4B39] hover:bg-[#DD4B39]/5 transition-all flex items-center justify-center gap-2"
-        >
-          <Plus className="w-4 h-4" />
-          Add another child
-        </button>
+        {/* Add another child — capped at the number of memberships purchased */}
+        {canAddChild ? (
+          <button
+            type="button"
+            onClick={addChild}
+            className="w-full py-3 border-2 border-dashed border-[#DD4B39]/40 rounded-xl text-[#DD4B39] text-sm font-medium hover:border-[#DD4B39] hover:bg-[#DD4B39]/5 transition-all flex items-center justify-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            Add another child
+            {constrainedToPurchase && (
+              <span className="text-xs text-[#DD4B39]/70">
+                ({purchasedTiers.length - children.length} membership
+                {purchasedTiers.length - children.length === 1 ? "" : "s"} left)
+              </span>
+            )}
+          </button>
+        ) : constrainedToPurchase ? (
+          <p className="text-center text-xs text-gray-500">
+            You've added a child for each membership you purchased. Need another?{" "}
+            <a href="https://joinmailday.com/start" className="text-[#DD4B39] underline">
+              Add a membership
+            </a>
+            .
+          </p>
+        ) : null}
 
         <Separator />
 

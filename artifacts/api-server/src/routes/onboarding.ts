@@ -10,6 +10,50 @@ const router: IRouter = Router();
 // parent row, so `created_at` is the issue time.
 const ONBOARDING_TOKEN_TTL_DAYS = 30;
 
+const VALID_TIERS = ["Core", "Minis", "Homeschool Core", "Homeschool Minis"];
+
+/** A tier is a "Minis" tier if it serves ages 3–5. */
+function isMinisTier(tier: string): boolean {
+  return tier.endsWith("Minis");
+}
+
+/**
+ * Phase 8: pick the membership that best fits this child's age, from the
+ * memberships the family actually purchased. Mirrors the /start form's behaviour
+ * (auto-select by age, parent can override) but constrained to what was paid for.
+ */
+function pickBestSlot(
+  slots: Array<{ id: string; tier: string }>,
+  age: number,
+): { id: string; tier: string } | undefined {
+  const wantMinis = age <= 5;
+  return slots.find((s) => isMinisTier(s.tier) === wantMinis) ?? slots[0];
+}
+
+/**
+ * A family's memberships, oldest first.
+ *
+ * Returns BOTH the full set and the unclaimed subset, because "no unclaimed
+ * memberships" is ambiguous on its own: it means either "this family predates
+ * membership tracking" (legacy — allow any tier) or "they've already assigned
+ * every membership they bought" (reject). `hasAny` disambiguates.
+ */
+async function fetchSlots(parentId: string): Promise<{
+  hasAny: boolean;
+  available: Array<{ id: string; tier: string }>;
+}> {
+  const { data } = await supabase
+    .from("membership_slots")
+    .select("id, tier, child_id")
+    .eq("parent_id", parentId)
+    .order("created_at");
+  const all = (data ?? []) as Array<{ id: string; tier: string; child_id: string | null }>;
+  return {
+    hasAny: all.length > 0,
+    available: all.filter((s) => s.child_id === null).map((s) => ({ id: s.id, tier: s.tier })),
+  };
+}
+
 // GET /api/onboarding/:token — public, returns parent info for prefill
 router.get("/onboarding/:token", async (req, res) => {
   try {
@@ -35,10 +79,20 @@ router.get("/onboarding/:token", async (req, res) => {
       }
     }
 
+    // Phase 8: tell the form which memberships this family actually purchased,
+    // so the parent picks from those instead of all four tiers. Families created
+    // before membership_slots existed have none — the form then falls back to
+    // the old behaviour (any valid tier).
+    const { available: availableSlots } = await fetchSlots(parent.id as string);
+
     // Don't leak created_at to the client (used only for the expiry check)
     const { created_at, ...safeParent } = parent as Record<string, unknown>;
     void created_at;
-    res.json(safeParent);
+    res.json({
+      ...safeParent,
+      available_memberships: availableSlots,
+      memberships_remaining: availableSlots.length,
+    });
   } catch (err) {
     req.log?.error({ err }, "Error fetching onboarding parent");
     res.status(500).json({ error: "Internal server error" });
@@ -95,17 +149,58 @@ router.post("/onboarding/:token/child", async (req, res) => {
       return;
     }
 
-    // Tier: use parent's tier as homeschool/non-homeschool hint; let computeTier
-    // pick Core vs Minis from the actual age.
-    const parentTier = parent.membership_tier as string | null;
-    const computedTier = computeTier(childAge, parentTier ?? "Core");
-    if (!computedTier) {
-      res.status(400).json({ error: "Child age must fall within a supported tier (3–12 years)" });
-      return;
+    // ─── Tier resolution (Phase 8) ────────────────────────────────────────────
+    // A child's tier is the membership that was PURCHASED for them, never derived
+    // from the parent's tier. The parent picks which membership this child uses
+    // (auto-suggested by age); we then claim that slot so the family can't enrol
+    // more children than memberships they bought.
+    //
+    // Legacy fallback: families that predate membership_slots have no slots, so
+    // we keep the old age/parent-tier behaviour for them.
+    const { hasAny: hasMemberships, available: availableSlots } = await fetchSlots(parent.id as string);
+
+    let tier: string;
+    let claimedSlot: { id: string; tier: string } | undefined;
+
+    if (hasMemberships) {
+      // They're on the membership model — every child must claim one, so a family
+      // can never enrol more children than memberships they purchased.
+      if (availableSlots.length === 0) {
+        res.status(400).json({
+          error:
+            "All of your memberships have already been assigned to a child. " +
+            "If you'd like to add another child, please purchase an additional membership.",
+        });
+        return;
+      }
+      if (body.tier && VALID_TIERS.includes(body.tier)) {
+        claimedSlot = availableSlots.find((s) => s.tier === body.tier);
+        if (!claimedSlot) {
+          const remaining = [...new Set(availableSlots.map((s) => s.tier))].join(", ");
+          res.status(400).json({
+            error: `You don't have an unused ${body.tier} membership. Remaining: ${remaining}.`,
+          });
+          return;
+        }
+      } else {
+        claimedSlot = pickBestSlot(availableSlots, childAge);
+      }
+      if (!claimedSlot) {
+        res.status(400).json({
+          error: "All of your memberships have already been assigned to a child.",
+        });
+        return;
+      }
+      tier = claimedSlot.tier;
+    } else {
+      const parentTier = parent.membership_tier as string | null;
+      const computedTier = computeTier(childAge, parentTier ?? "Core");
+      if (!computedTier) {
+        res.status(400).json({ error: "Child age must fall within a supported tier (3–12 years)" });
+        return;
+      }
+      tier = body.tier && VALID_TIERS.includes(body.tier) ? body.tier : computedTier;
     }
-    // Allow explicit override only if it's a valid tier value.
-    const validTiers = ["Core", "Minis", "Homeschool Core", "Homeschool Minis"];
-    const tier = body.tier && validTiers.includes(body.tier) ? body.tier : computedTier;
 
     const interests: string[] = Array.isArray(body.interests) ? body.interests.slice(0, 10) : [];
 
@@ -139,8 +234,26 @@ router.post("/onboarding/:token/child", async (req, res) => {
       return;
     }
 
+    // Claim the membership. The `.is("child_id", null)` guard makes this safe if
+    // two of the family's children are submitted at the same time — the second
+    // write can't steal a membership the first already claimed.
+    if (claimedSlot) {
+      const { data: claimed } = await supabase
+        .from("membership_slots")
+        .update({ child_id: child.id, assigned_at: new Date().toISOString() })
+        .eq("id", claimedSlot.id)
+        .is("child_id", null)
+        .select("id");
+      if (!claimed || claimed.length === 0) {
+        req.log?.warn(
+          { childId: child.id, slotId: claimedSlot.id },
+          "Membership slot was claimed concurrently; child saved but slot not linked",
+        );
+      }
+    }
+
     req.log?.info(
-      { childId: child.id, parentId: parent.id, tier, age: childAge },
+      { childId: child.id, parentId: parent.id, tier, age: childAge, slotId: claimedSlot?.id ?? null },
       "Child created via onboarding form",
     );
     res.status(201).json({ success: true, child_first_name: child.child_first_name });
