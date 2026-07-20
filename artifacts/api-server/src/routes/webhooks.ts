@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabase.js";
 import { emitKlaviyoEvent } from "../lib/klaviyo-events.js";
 import { isCrossTier } from "../lib/age.js";
 import { logger } from "../lib/logger.js";
+import { appBaseUrl } from "../lib/app-url.js";
 
 /**
  * Phase 3.6: After a child's tier changes (Shopify webhook or aging cron),
@@ -88,13 +89,8 @@ function verifyHmac(rawBody: Buffer | undefined, hmacHeader: string | undefined,
 // ─── App URL helper ──────────────────────────────────────────────────────────
 // Used to construct onboarding links sent to Klaviyo as profile properties.
 
-function appBaseUrl(): string {
-  const explicit = process.env["APP_URL"];
-  if (explicit) return explicit.replace(/\/+$/, "");
-  const replit = (process.env["REPLIT_DOMAINS"] ?? "").split(",")[0]?.trim();
-  if (replit) return `https://${replit}`;
-  return "http://localhost";
-}
+// appBaseUrl now comes from lib/app-url.ts — one hardened implementation shared
+// by every emailed link (onboarding, address confirmation, password reset).
 
 // ─── Shopify order helpers ────────────────────────────────────────────────────
 

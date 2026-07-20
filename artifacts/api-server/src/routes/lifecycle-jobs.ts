@@ -25,6 +25,7 @@ import { tierChangeOnAging, isCrossTier } from "../lib/age.js";
 import { offboardFamily } from "../lib/lifecycle.js";
 import { emitKlaviyoEvent } from "../lib/klaviyo-events.js";
 import { computeSubscriptionMonth } from "../lib/subscription.js";
+import { appBaseUrl } from "../lib/app-url.js";
 
 const router: IRouter = Router();
 
@@ -926,15 +927,8 @@ export function stopLifecycleCrons(): void {
   packDueJob = null;
 }
 
-// ─── App-URL helper (mirrors the one in webhooks.ts; kept local to avoid extra import surface) ─
-
-function appBaseUrl(): string {
-  const explicit = process.env["APP_URL"];
-  if (explicit) return explicit.replace(/\/+$/, "");
-  const replit = (process.env["REPLIT_DOMAINS"] ?? "").split(",")[0]?.trim();
-  if (replit) return `https://${replit}`;
-  return "http://localhost";
-}
+// App-URL helper now lives in lib/app-url.ts (imported at the top of this file),
+// so all emailed links are built from one hardened implementation.
 
 // ─── Admin manual triggers (very useful for testing) ─────────────────────────
 

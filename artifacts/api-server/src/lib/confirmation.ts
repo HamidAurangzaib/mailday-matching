@@ -45,17 +45,7 @@ export interface CreateTokenResult {
   expiresAt: string;
 }
 
-/**
- * Returns the canonical app base URL (no trailing slash). Used to construct
- * confirmation links. Honours APP_URL first, then REPLIT_DOMAINS as a fallback.
- */
-function appBaseUrl(): string {
-  const explicit = process.env["APP_URL"];
-  if (explicit) return explicit.replace(/\/+$/, "");
-  const replit = (process.env["REPLIT_DOMAINS"] ?? "").split(",")[0]?.trim();
-  if (replit) return `https://${replit}`;
-  return "http://localhost";
-}
+import { appBaseUrl } from "./app-url.js";
 
 export async function createConfirmationToken(args: CreateTokenArgs): Promise<CreateTokenResult> {
   const ttl = args.ttlHours ?? DEFAULT_TTL_HOURS[args.type];

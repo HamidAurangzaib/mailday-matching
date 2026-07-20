@@ -6,6 +6,7 @@ import { signToken } from "../lib/jwt.js";
 import { requireAuth, type AuthRequest } from "../middlewares/auth.js";
 import { LoginBody } from "@workspace/api-zod";
 import { logger } from "../lib/logger.js";
+import { appBaseUrl } from "../lib/app-url.js";
 
 const router: IRouter = Router();
 
@@ -184,8 +185,7 @@ router.post("/auth/forgot-password", async (req, res) => {
       .update({ reset_token: token, reset_token_expires_at: expiresAt })
       .eq("id", user.id);
 
-    const appUrl = process.env.APP_URL ?? `https://${(process.env.REPLIT_DOMAINS ?? "").split(",")[0]}`;
-    const resetUrl = `${appUrl}/reset-password?token=${token}`;
+    const resetUrl = `${appBaseUrl()}/reset-password?token=${token}`;
 
     const sent = await sendResetEmail(user.email, resetUrl);
     if (!sent) {
