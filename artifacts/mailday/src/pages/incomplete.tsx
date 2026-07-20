@@ -1,5 +1,6 @@
 import { useGetIncompleteOnboarding } from "@workspace/api-client-react";
 import { format } from "date-fns";
+import { useState } from "react";
 import {
   Table,
   TableBody,
@@ -10,10 +11,15 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle, Mail } from "lucide-react";
+import { AlertCircle, Mail, ChevronRight } from "lucide-react";
+import { ParentSheet } from "@/components/parent-sheet";
+import { useAuth } from "@/lib/auth";
 
 export default function Incomplete() {
   const { data: parents, isLoading } = useGetIncompleteOnboarding();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  const [selectedParentId, setSelectedParentId] = useState<string | null>(null);
 
   return (
     <div className="p-4 md:p-8 space-y-6">
@@ -34,18 +40,19 @@ export default function Incomplete() {
               <TableHead>Tier</TableHead>
               <TableHead>Join Date</TableHead>
               <TableHead className="text-right">Days Waiting</TableHead>
+              <TableHead className="w-8" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-24 text-center">
+                <TableCell colSpan={7} className="h-24 text-center">
                   <Skeleton className="h-8 w-full" />
                 </TableCell>
               </TableRow>
             ) : parents?.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
+                <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
                   <div className="flex flex-col items-center justify-center">
                     <div className="w-12 h-12 bg-green-500/10 rounded-full flex items-center justify-center mb-3">
                       <div className="w-6 h-6 text-green-500">✓</div>
@@ -60,7 +67,11 @@ export default function Incomplete() {
                 const isWarning = days > 7;
                 
                 return (
-                  <TableRow key={parent.id}>
+                  <TableRow
+                    key={parent.id}
+                    className="cursor-pointer hover:bg-muted/50 transition-colors"
+                    onClick={() => setSelectedParentId(parent.id)}
+                  >
                     <TableCell className="font-medium">
                       {parent.first_name} {parent.last_name}
                     </TableCell>
@@ -91,6 +102,9 @@ export default function Incomplete() {
                         <span className="text-muted-foreground">{days} days</span>
                       )}
                     </TableCell>
+                    <TableCell>
+                      <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                    </TableCell>
                   </TableRow>
                 );
               })
@@ -98,6 +112,13 @@ export default function Incomplete() {
           </TableBody>
         </Table>
       </div>
+
+      <ParentSheet
+        parentId={selectedParentId}
+        open={!!selectedParentId}
+        onClose={() => setSelectedParentId(null)}
+        isAdmin={isAdmin}
+      />
     </div>
   );
 }
