@@ -27,7 +27,8 @@ export type TemplateKey =
   | "onboarding_nudge"
   | "match_notification"
   | "guarantee_breach"
-  | "pause_offer"
+  // "pause_offer" removed 2026-07-20 — pauses are now offered manually, because
+  // the app cannot pause ReCharge billing (see webhooks.ts cancellation block).
   | "address_change_confirm";
 
 export interface SendEmailArgs {

@@ -427,14 +427,18 @@ router.post("/webhooks/recharge/subscriptions", async (req: RawRequest, res) => 
     }
 
     // Phase 3.9: on CANCELLED, do NOT immediately end matches or change
-    // subscription_status. Hold the family in a 48h grace window. Send R4
-    // pause-offer email + create cancellations row with intent. The
-    // `runFinaliseCancellations()` cron handles the rest.
+    // subscription_status. Hold the family in a 48h grace window and create the
+    // cancellations row. `runFinaliseCancellations()` offboards them after that.
+    //
+    // The automated R4 pause-offer email was removed (Courtney, 2026-07-20): the
+    // app can mark a family paused locally but cannot pause ReCharge billing, so
+    // offering a pause automatically risked telling a parent they were paused
+    // while their card kept being charged. Pauses are now offered by hand.
+    // The 48h window is kept as a deliberate buffer before offboarding.
     if (rawStatus === "CANCELLED") {
       // Override subscription_status — we keep them Active for 48h.
       parentUpdate.subscription_status = "Active";
       parentUpdate.intent_to_cancel_at = new Date().toISOString();
-      parentUpdate.pause_offer_sent_at = new Date().toISOString();
       // Don't change billing_paused — match stays "live" during grace window.
     }
 
@@ -446,7 +450,7 @@ router.post("/webhooks/recharge/subscriptions", async (req: RawRequest, res) => 
         : supabase.from("children").update({ billing_paused }).eq("parent_id", parent.id),
     ]);
 
-    // On CANCELLED: send R4 pause-offer email + create cancellations row.
+    // On CANCELLED: create the cancellations row + review task for the team.
     if (rawStatus === "CANCELLED") {
       const cancelDate = new Date().toISOString().split("T")[0];
       const joinDateObj = parent.join_date ? new Date(parent.join_date) : new Date();
@@ -474,50 +478,22 @@ router.post("/webhooks/recharge/subscriptions", async (req: RawRequest, res) => 
           supabase.from("cancellation_notes").insert({
             cancellation_id: cancellation.id,
             note_type: "system",
-            content: `Cancellation received via ReCharge webhook. Tenure: ${tenureMonths} months. 48h pause-offer window started. Raw reason: ${(payload.subscription as Record<string, unknown> | undefined)?.["cancellation_reason"] ?? "Not provided"}.`,
+            content: `Cancellation received via ReCharge webhook. Tenure: ${tenureMonths} months. 48h grace window started. Raw reason: ${(payload.subscription as Record<string, unknown> | undefined)?.["cancellation_reason"] ?? "Not provided"}.`,
             created_by: "system",
           }),
           supabase.from("cancellation_tasks").insert({
             cancellation_id: cancellation.id,
             type: "review_needed",
-            title: "New cancellation — pause offer sent, 48h grace",
-            description: `${parentName} · ${tier} · ${cancelDate}. If no response in 48h, family will be offboarded automatically.`,
+            title: "New cancellation — 48h grace before offboarding",
+            description: `${parentName} · ${tier} · ${cancelDate}. If you want to offer a pause, email them within 48h — the app no longer sends an automatic pause offer. Otherwise the family is offboarded automatically.`,
           }),
         ]);
         req.log?.info({ parentId: parent.id, cancellationId: cancellation.id, tenureMonths }, "Cancellation tracker row created (48h grace)");
       }
 
-      // Send R4 with one-click pause / confirm-cancel links.
-      try {
-        const { createConfirmationToken } = await import("../lib/confirmation.js");
-        const { sendEmail } = await import("../lib/email.js");
-
-        const pauseToken = await createConfirmationToken({
-          type: "pause_offer",
-          email,
-          parentId: parent.id,
-          payload: { months: 2, decline: false },
-        });
-        const cancelToken = await createConfirmationToken({
-          type: "pause_offer",
-          email,
-          parentId: parent.id,
-          payload: { decline: true },
-        });
-
-        await sendEmail({
-          to: email,
-          templateKey: "pause_offer",
-          vars: {
-            parent_first_name: (parent as Record<string, string | null>)["first_name"] ?? "",
-            pause_url: pauseToken.url,
-            confirm_cancel_url: cancelToken.url,
-          },
-        });
-        req.log?.info({ parentId: parent.id }, "R4 pause-offer email dispatched");
-      } catch (sendErr) {
-        req.log?.error({ err: sendErr, parentId: parent.id }, "Failed to send R4 pause-offer email");
-      }
+      // The automated R4 pause-offer email used to be sent here. Removed
+      // 2026-07-20 — see the note above. The team offers pauses manually, and
+      // the cancellation task created above prompts them to do so.
     }
 
     req.log?.info({ parentId: parent.id, rawStatus, billing_paused }, "ReCharge subscription webhook processed");

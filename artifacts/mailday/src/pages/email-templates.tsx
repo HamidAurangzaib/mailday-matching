@@ -53,10 +53,6 @@ const FRIENDLY_NAMES: Record<string, { name: string; description: string }> = {
     name: "Guarantee breach apology",
     description: "Sent when a child crosses the 21-day match guarantee and billing auto-pauses.",
   },
-  pause_offer: {
-    name: "Pause offer",
-    description: "Sent when a family cancels in ReCharge — last save attempt before offboarding.",
-  },
   address_change_confirm: {
     name: "Address change confirmation",
     description: "Sent whenever someone tries to change a mailing address via the public forms.",

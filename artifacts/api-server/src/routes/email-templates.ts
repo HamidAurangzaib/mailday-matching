@@ -182,11 +182,8 @@ const SAMPLE_VARS: Record<string, Record<string, string>> = {
     child_first_name: "Sam",
     days_waiting: "22",
   },
-  pause_offer: {
-    parent_first_name: "Jane",
-    pause_url: "https://example.test/api/confirm/pause-demo",
-    confirm_cancel_url: "https://example.test/api/confirm/cancel-demo",
-  },
+  // `pause_offer` removed 2026-07-20 — the app can't pause ReCharge billing, so
+  // pauses are offered manually by the team instead of by automated email.
   address_change_confirm: {
     new_address: "123 Newhouse Way, Springfield, IL 62701",
     confirm_url: "https://example.test/api/confirm/addr-demo",
