@@ -10,7 +10,28 @@ const router: IRouter = Router();
 // parent row, so `created_at` is the issue time.
 const ONBOARDING_TOKEN_TTL_DAYS = 30;
 
+// Guardian attestation (item D1) — the exact statements the attorney specified.
+// Versioned so a stored `guardian_attestation_version` always maps back to the
+// precise wording a parent agreed to, even if we revise it later.
+const GUARDIAN_ATTESTATION_VERSION = "2026-08-v1";
+export const GUARDIAN_ATTESTATION_STATEMENTS = [
+  "I am this child's parent or legal guardian.",
+  "I am 18 years of age or older.",
+  "I will read all letters my child sends and receives.",
+  "I understand MailDay may refuse or remove any member for any reason, with a refund.",
+] as const;
+
 const VALID_TIERS = ["Core", "Minis", "Homeschool Core", "Homeschool Minis"];
+
+/** Shared token validation for onboarding endpoints: returns the parent or null. */
+async function loadParentByToken(token: string) {
+  const { data } = await supabase
+    .from("parents")
+    .select("id, membership_tier, created_at, guardian_attestation_at")
+    .eq("onboarding_token", token)
+    .single();
+  return data;
+}
 
 /** A tier is a "Minis" tier if it serves ages 3–5. */
 function isMinisTier(tier: string): boolean {
@@ -95,6 +116,51 @@ router.get("/onboarding/:token", async (req, res) => {
     });
   } catch (err) {
     req.log?.error({ err }, "Error fetching onboarding parent");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /api/onboarding/:token/attestation — public. Records that the parent
+// checked all four guardian-attestation boxes, with the timestamp and the
+// wording version they agreed to. Called once per submit, before the children.
+// Idempotent: if already recorded, we keep the original timestamp.
+router.post("/onboarding/:token/attestation", async (req, res) => {
+  try {
+    const parent = await loadParentByToken(req.params.token);
+    if (!parent) {
+      res.status(404).json({ error: "Invalid or expired onboarding link" });
+      return;
+    }
+    if (parent.created_at) {
+      const age = differenceInDays(new Date(), parseISO(parent.created_at as string));
+      if (age > ONBOARDING_TOKEN_TTL_DAYS) {
+        res.status(410).json({ error: "This onboarding link has expired. Please contact MailDay to receive a new one." });
+        return;
+      }
+    }
+
+    // The form requires all four; the server confirms it too so the record can't
+    // be created without genuine agreement to every statement.
+    const agreed = req.body?.agreed;
+    if (agreed !== true) {
+      res.status(400).json({ error: "All guardian statements must be agreed to before continuing." });
+      return;
+    }
+
+    // Keep the first attestation if one already exists (don't overwrite the date).
+    if (!parent.guardian_attestation_at) {
+      await supabase
+        .from("parents")
+        .update({
+          guardian_attestation_at: new Date().toISOString(),
+          guardian_attestation_version: GUARDIAN_ATTESTATION_VERSION,
+        })
+        .eq("id", parent.id);
+    }
+
+    res.json({ success: true, version: GUARDIAN_ATTESTATION_VERSION });
+  } catch (err) {
+    req.log?.error({ err }, "Error recording guardian attestation");
     res.status(500).json({ error: "Internal server error" });
   }
 });

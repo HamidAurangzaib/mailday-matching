@@ -81,6 +81,14 @@ function calcAge(dob: string): number | null {
   return age >= 1 && age <= 18 ? age : null;
 }
 
+// Guardian attestation (item D1) — must match the backend's canonical wording.
+const GUARDIAN_ATTESTATION_STATEMENTS = [
+  "I am this child's parent or legal guardian.",
+  "I am 18 years of age or older.",
+  "I will read all letters my child sends and receives.",
+  "I understand MailDay may refuse or remove any member for any reason, with a refund.",
+];
+
 const ALL_TIER_VALUES = TIERS.map((t) => t.value);
 
 /**
@@ -360,6 +368,14 @@ export default function Onboarding() {
   const [submittedNames, setSubmittedNames] = useState<string[]>([]);
   const [globalError, setGlobalError] = useState<string | null>(null);
 
+  // Guardian attestation — all four boxes required before the form can submit.
+  const [attested, setAttested] = useState<boolean[]>(
+    () => GUARDIAN_ATTESTATION_STATEMENTS.map(() => false),
+  );
+  const allAttested = attested.every(Boolean);
+  const toggleAttestation = (i: number) =>
+    setAttested((prev) => prev.map((v, idx) => (idx === i ? !v : v)));
+
   const updateChild = (uid: string, updates: Partial<ChildForm>) => {
     setChildren((prev) => prev.map((c) => c.uid === uid ? { ...c, ...updates } : c));
   };
@@ -385,13 +401,30 @@ export default function Onboarding() {
   const canSubmit = children.every((c) => {
     const age = calcAge(c.date_of_birth);
     return c.child_first_name.trim().length > 0 && age !== null;
-  }) && !submitting;
+  }) && allAttested && !submitting;
 
   const handleSubmit = async () => {
     if (!canSubmit || !token) return;
     setSubmitting(true);
     setGlobalError(null);
     setProgress({ done: 0, total: children.length });
+
+    // Record the guardian attestation once, before any child, so the account has
+    // a documented, timestamped agreement even if a child save later fails.
+    try {
+      await customFetch(`/api/onboarding/${token}/attestation`, {
+        method: "POST",
+        body: JSON.stringify({ agreed: true }),
+      });
+    } catch (err) {
+      setSubmitting(false);
+      setGlobalError(
+        err instanceof Error && err.message
+          ? err.message
+          : "We couldn't record your confirmation. Please try again.",
+      );
+      return;
+    }
 
     const succeeded: string[] = [];
     const failed: string[] = [];
@@ -582,6 +615,24 @@ export default function Onboarding() {
 
         <Separator />
 
+        {/* Guardian attestation — all four required before submitting */}
+        <div className="space-y-3 bg-[#FFF9F4] border border-[#DD4B39]/15 rounded-xl p-4">
+          <p className="text-sm font-semibold text-gray-800">Before you finish, please confirm:</p>
+          <div className="space-y-2.5">
+            {GUARDIAN_ATTESTATION_STATEMENTS.map((statement, i) => (
+              <label key={i} className="flex items-start gap-2.5 cursor-pointer text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={attested[i]}
+                  onChange={() => toggleAttestation(i)}
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-[#DD4B39] focus:ring-[#DD4B39] cursor-pointer"
+                />
+                <span>{statement}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
         {/* Global error */}
         {globalError && (
           <div className="flex items-start gap-2 text-destructive text-sm bg-destructive/10 p-3 rounded-lg">
@@ -593,7 +644,9 @@ export default function Onboarding() {
         {/* Validation nudge */}
         {!canSubmit && !submitting && (
           <p className="text-xs text-center text-gray-400">
-            Please fill in a name and date of birth for each child before submitting.
+            {children.every((c) => c.child_first_name.trim() && calcAge(c.date_of_birth) !== null) && !allAttested
+              ? "Please check all four boxes above to continue."
+              : "Please fill in a name and date of birth for each child before submitting."}
           </p>
         )}
 
