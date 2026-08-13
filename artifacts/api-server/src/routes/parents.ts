@@ -4,6 +4,62 @@ import { requireAuth, requireAdmin, type AuthRequest } from "../middlewares/auth
 
 const router: IRouter = Router();
 
+// A1 (attorney-required): admin visibility of outstanding address changes.
+// A change isn't applied until the parent clicks the emailed link, so anything
+// listed here is a *proposed* change awaiting confirmation. Shows old → new so a
+// parent (or admin) could spot an unwanted redirect. Never exposes the token
+// itself (that's the secret confirm link).
+router.get("/admin/pending-address-changes", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    const nowIso = new Date().toISOString();
+    const { data: tokens, error } = await supabase
+      .from("confirmation_tokens")
+      .select("parent_id, email, payload, created_at, expires_at")
+      .eq("type", "address_change")
+      .is("consumed_at", null)
+      .gt("expires_at", nowIso)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      req.log?.error({ error }, "Error loading pending address changes");
+      res.status(500).json({ error: "Failed to load pending address changes" });
+      return;
+    }
+
+    const parentIds = [...new Set((tokens ?? []).map((t) => t.parent_id).filter(Boolean))] as string[];
+    const parentMap = new Map<string, Record<string, unknown>>();
+    if (parentIds.length > 0) {
+      const { data: parents } = await supabase
+        .from("parents")
+        .select("id, first_name, last_name, email, mailing_address")
+        .in("id", parentIds);
+      for (const p of parents ?? []) parentMap.set(p.id as string, p);
+    }
+
+    const items = (tokens ?? []).map((t) => {
+      const payload = (t.payload ?? {}) as Record<string, unknown>;
+      const parent = t.parent_id ? parentMap.get(t.parent_id as string) : undefined;
+      const target = (payload["target"] as string) ?? "parent";
+      return {
+        parent_name: parent
+          ? `${parent["first_name"] ?? ""} ${parent["last_name"] ?? ""}`.trim()
+          : null,
+        email: (parent?.["email"] as string) ?? (t.email as string) ?? null,
+        target, // 'parent' or 'gak_application'
+        current_address: target === "parent" ? (parent?.["mailing_address"] as string) ?? null : null,
+        new_address: (payload["new_address"] as string) ?? null,
+        requested_at: t.created_at,
+        expires_at: t.expires_at,
+      };
+    });
+
+    res.json(items);
+  } catch (err) {
+    req.log?.error({ err }, "Error loading pending address changes");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.get("/parents", requireAuth, async (req: AuthRequest, res) => {
   try {
     let query = supabase

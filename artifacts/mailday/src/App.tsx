@@ -23,6 +23,7 @@ import Parents from "@/pages/parents";
 import Users from "@/pages/users";
 import EmailTemplates from "@/pages/email-templates";
 import AuditLog from "@/pages/audit-log";
+import PendingAddresses from "@/pages/pending-addresses";
 import Onboarding from "@/pages/onboarding";
 import Enroll from "@/pages/enroll";
 import VAPerformance from "@/pages/va-performance";
@@ -99,6 +100,7 @@ const ParentsPage = makePage(Parents);
 const UsersPage = makePage(Users, true);
 const EmailTemplatesPage = makePage(EmailTemplates, true);
 const AuditLogPage = makePage(AuditLog, true);
+const PendingAddressesPage = makePage(PendingAddresses, true);
 const VAPerformancePage = makePage(VAPerformance);
 const GiveAKeyDashboardPage = makePage(GiveAKeyDashboard, true);
 const GiveAKeyApplicationsPage = makePage(GiveAKeyApplications);
@@ -125,6 +127,7 @@ function Router() {
       <Route path="/users" component={UsersPage} />
       <Route path="/admin/email-templates" component={EmailTemplatesPage} />
       <Route path="/admin/audit-log" component={AuditLogPage} />
+      <Route path="/admin/pending-addresses" component={PendingAddressesPage} />
       <Route path="/performance" component={VAPerformancePage} />
       <Route path="/onboarding" component={Onboarding} />
       <Route path="/enroll" component={Enroll} />

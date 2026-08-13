@@ -16,6 +16,7 @@ import {
   Users,
   UserPlus,
   Activity,
+  MapPin,
   History,
   LogOut,
   Mail,
@@ -197,6 +198,7 @@ function NavTree({
         <NavSection title="Admin" icon={ShieldCheck}>
           <NavItem href="/users" icon={ShieldCheck} label="User Management" location={location} onNavigate={onNavigate} />
           <NavItem href="/admin/email-templates" icon={Mail} label="Email Templates" location={location} onNavigate={onNavigate} />
+          <NavItem href="/admin/pending-addresses" icon={MapPin} label="Pending Addresses" location={location} onNavigate={onNavigate} />
           <NavItem href="/admin/audit-log" icon={Activity} label="Audit Log" location={location} onNavigate={onNavigate} />
         </NavSection>
       )}
