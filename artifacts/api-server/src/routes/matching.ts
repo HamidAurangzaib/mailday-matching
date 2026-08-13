@@ -70,25 +70,47 @@ router.post("/matching/run", requireAuth, async (req: AuthRequest, res) => {
       (previousMatches || []).map((m) => [m.child_a_id, m.child_b_id].sort().join("|"))
     );
 
-    // Build the prompt for Claude
-    const childrenForClaude = children.map((c) => ({
-      id: c.id,
-      name: c.child_first_name,
-      age: c.age,
-      tier: c.tier,
-      interests: c.interests || [],
-      state: (c as Record<string, unknown> & { parents?: { state?: string } }).parents?.state || "Unknown",
-      homeschool_edition: c.homeschool_edition,
-      days_waiting: computeDaysWaiting(c as Record<string, unknown>),
-      // Phase 3.1: orphans get priority. Surface this to Claude.
-      rematch_priority: Boolean((c as Record<string, unknown>)["rematch_priority"]),
-      // Phase 7 (same-month preference): the child's per-child subscription month
-      // (counts from their own created_date). Same month = same monthly pack +
-      // writing mission, so prefer pairing equal months when possible.
-      subscription_month: (c as Record<string, unknown>)["created_date"]
-        ? computeSubscriptionMonth((c as Record<string, unknown>)["created_date"] as string)
-        : null,
-    }));
+    // A2 (attorney-required): children's real first names must NEVER leave our
+    // system. Each child is represented to the AI only by an opaque per-run code
+    // (CHILD_1, CHILD_2, …) — no name, not even the database id. We translate the
+    // codes back to real ids on the way out. Age / interests / state stay (not
+    // identifying on their own and needed for a good match).
+    const idToCode = new Map<string, string>();
+    const codeToId = new Map<string, string>();
+    const childrenForClaude = children.map((c, i) => {
+      const code = `CHILD_${i + 1}`;
+      idToCode.set(c.id as string, code);
+      codeToId.set(code, c.id as string);
+      return {
+        id: code,
+        age: c.age,
+        tier: c.tier,
+        interests: c.interests || [],
+        state: (c as Record<string, unknown> & { parents?: { state?: string } }).parents?.state || "Unknown",
+        homeschool_edition: c.homeschool_edition,
+        days_waiting: computeDaysWaiting(c as Record<string, unknown>),
+        // Phase 3.1: orphans get priority. Surface this to Claude.
+        rematch_priority: Boolean((c as Record<string, unknown>)["rematch_priority"]),
+        // Phase 7 (same-month preference): the child's per-child subscription month
+        // (counts from their own created_date). Same month = same monthly pack +
+        // writing mission, so prefer pairing equal months when possible.
+        subscription_month: (c as Record<string, unknown>)["created_date"]
+          ? computeSubscriptionMonth((c as Record<string, unknown>)["created_date"] as string)
+          : null,
+      };
+    });
+
+    // Express the "previously matched" protection in codes too — otherwise the AI
+    // (which only sees codes) can't recognise the real ids. Only pairs where BOTH
+    // children are in the current pool can be re-suggested, so only those matter.
+    const previousPairsCoded = [...previousPairs]
+      .map((pair) => {
+        const [idA, idB] = pair.split("|");
+        const codeA = idToCode.get(idA ?? "");
+        const codeB = idToCode.get(idB ?? "");
+        return codeA && codeB ? [codeA, codeB].sort().join("|") : null;
+      })
+      .filter((p): p is string => p !== null);
 
     const prompt = `You are a pen pal matching specialist for a children's membership program called MailDay. Your job is to suggest the best possible pen pal matches from the unmatched children below.
 
@@ -101,7 +123,7 @@ MATCHING RULES (follow strictly):
 6. PRIORITY: any child with rematch_priority=true is an "orphan" — their previous pen pal vanished through no fault of their own. Pair these children first, before any others.
 7. SAME-MONTH PREFERENCE (soft): prefer pairing children with the SAME subscription_month — they receive the same monthly pack and the same writing mission, so they share an adventure. Try same-month pairs first. This is ONLY a preference: never break rules 1-2 (age band / age proximity) to achieve it. If a child has no valid same-month partner, match them with the best available partner regardless of month — do not leave them unmatched just to wait for a same-month option.
 
-Previously matched pairs (do NOT suggest these): ${previousPairs.size > 0 ? [...previousPairs].join(", ") : "None"}
+Previously matched pairs (do NOT suggest these): ${previousPairsCoded.length > 0 ? previousPairsCoded.join(", ") : "None"}
 
 UNMATCHED CHILDREN:
 ${JSON.stringify(childrenForClaude, null, 2)}
@@ -155,6 +177,13 @@ Rules for your response:
       req.log?.error({ parseErr, claudeResponse }, "Failed to parse Claude response");
       res.status(500).json({ error: "Failed to parse AI response" });
       return;
+    }
+
+    // A2: translate the opaque codes in the AI's response back to real child ids,
+    // so the rest of the pipeline (which keys on real ids) works unchanged.
+    for (const s of parsed.suggestions ?? []) {
+      s.child_a_id = codeToId.get(s.child_a_id) ?? s.child_a_id;
+      s.child_b_id = codeToId.get(s.child_b_id) ?? s.child_b_id;
     }
 
     // Build a lookup map for children
