@@ -188,6 +188,31 @@ const SAMPLE_VARS: Record<string, Record<string, string>> = {
     new_address: "123 Newhouse Way, Springfield, IL 62701",
     confirm_url: "https://example.test/api/confirm/addr-demo",
   },
+  // Group A / A4 — consent-workflow emails.
+  consent_reminder_1: {
+    child_first_name: "Sam",
+    penpal_first_name: "Alex",
+    consent_url: "https://example.test/api/confirm/consent-demo",
+  },
+  consent_reminder_2: {
+    parent_first_name: "Jane",
+    child_first_name: "Sam",
+    penpal_first_name: "Alex",
+    full_address: "Home, 123 Maple St, Springfield IL 62701",
+    consent_url: "https://example.test/api/confirm/consent-demo",
+  },
+  consent_pause: {
+    parent_first_name: "Jane",
+    child_first_name: "Sam",
+    reactivate_url: "https://example.test/api/confirm/reactivate-demo",
+  },
+  consent_declined: {
+    parent_first_name: "Jane",
+  },
+  match_didnt_work_out: {
+    parent_first_name: "Jane",
+    child_first_name: "Sam",
+  },
 };
 
 function interpolate(template: string, vars: Record<string, string>): string {

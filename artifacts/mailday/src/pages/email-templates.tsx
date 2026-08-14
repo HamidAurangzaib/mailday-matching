@@ -57,6 +57,26 @@ const FRIENDLY_NAMES: Record<string, { name: string; description: string }> = {
     name: "Address change confirmation",
     description: "Sent whenever someone tries to change a mailing address via the public forms.",
   },
+  consent_reminder_1: {
+    name: "Consent reminder 1 (Poppy, day 2)",
+    description: "From Poppy — nudges a parent who hasn't yet consented to share their address, 2 days after a match.",
+  },
+  consent_reminder_2: {
+    name: "Consent reminder 2 (day 7)",
+    description: "Second nudge at day 7, showing the address on file, before billing pauses at day 14.",
+  },
+  consent_pause: {
+    name: "Consent lapsed — billing paused (day 14)",
+    description: "Sent at day 14 when a parent never consented to share their address; billing is paused and the match is released.",
+  },
+  consent_declined: {
+    name: "Consent declined — membership cancelled",
+    description: "Sent to a parent who actively declines to share their address at match time.",
+  },
+  match_didnt_work_out: {
+    name: "Match didn't work out (partner family)",
+    description: "Sent to the other family when a match can't proceed — never says why, just that we're finding someone new.",
+  },
 };
 
 function useTemplates() {

@@ -29,7 +29,13 @@ export type TemplateKey =
   | "guarantee_breach"
   // "pause_offer" removed 2026-07-20 — pauses are now offered manually, because
   // the app cannot pause ReCharge billing (see webhooks.ts cancellation block).
-  | "address_change_confirm";
+  | "address_change_confirm"
+  // Group A / A4 — the two-party address-consent workflow emails.
+  | "consent_reminder_1"       // day 2, from Poppy
+  | "consent_reminder_2"       // day 7, from MailDay
+  | "consent_pause"            // day 14 — consent not given, billing paused
+  | "consent_declined"         // parent actively declined at match time
+  | "match_didnt_work_out";    // partner family (timeout or decline)
 
 export interface SendEmailArgs {
   to: string;
