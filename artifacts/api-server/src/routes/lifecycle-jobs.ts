@@ -729,6 +729,129 @@ async function handleAddressConsentTimeout(
   result.timedOut++;
 }
 
+export interface DeclineConsentResult {
+  ok: boolean;
+  matchId: string;
+  decliningChildId: string;
+  partnerChildId?: string;
+  emailsSent: number;
+  tasksCreated: number;
+  error?: string;
+}
+
+/**
+ * Active decline (A4): a family has told us — via support, not a button; the
+ * consent email is yes-only by design — that they will NOT share their address
+ * for this match. Wind the match down like a timeout, attributed as a decline:
+ * email the declining family (consent_declined) + queue a human task to handle
+ * their subscription in ReCharge, requeue the partner with priority + email
+ * match_didnt_work_out. Admin-triggered; idempotent-ish (only acts on a Pending
+ * match, and closing it makes a second call a no-op).
+ */
+export async function declineAddressConsent(
+  matchId: string,
+  decliningChildId: string,
+  actorEmail?: string | null,
+): Promise<DeclineConsentResult> {
+  const actor = actorEmail ?? "admin:consent-decline";
+  const out: DeclineConsentResult = {
+    ok: false, matchId, decliningChildId, emailsSent: 0, tasksCreated: 0,
+  };
+
+  const { data: match } = await supabase
+    .from("matches")
+    .select("id, child_a_id, child_b_id, match_status")
+    .eq("id", matchId)
+    .single();
+  if (!match) { out.error = "Match not found"; return out; }
+  if (match.match_status !== "Pending") {
+    out.error = `Match is ${match.match_status}; consent can only be declined on a Pending match`;
+    return out;
+  }
+  if (decliningChildId !== match.child_a_id && decliningChildId !== match.child_b_id) {
+    out.error = "That child is not part of this match";
+    return out;
+  }
+
+  const partnerChildId = decliningChildId === match.child_a_id ? match.child_b_id : match.child_a_id;
+  out.partnerChildId = partnerChildId;
+
+  const sides = await loadConsentSides(match.child_a_id, match.child_b_id);
+  const declining = decliningChildId === match.child_a_id ? sides.a : sides.b;
+  const partner = decliningChildId === match.child_a_id ? sides.b : sides.a;
+
+  const nowIso = new Date().toISOString();
+  const today = nowIso.split("T")[0];
+
+  // Declining family: park the child out of the pool, tell them we understand,
+  // and queue a human to handle their ReCharge subscription.
+  if (declining) {
+    await supabase.from("children")
+      .update({ match_status: "Unmatched", match_guarantee_start_date: today })
+      .eq("id", declining.id);
+    if (declining.parents?.email) {
+      const res = await sendEmail({
+        to: declining.parents.email,
+        templateKey: "consent_declined",
+        vars: { parent_first_name: declining.parents.first_name ?? "" },
+      });
+      if (res.ok) out.emailsSent++;
+      else out.error = `consent_declined send failed: ${res.error ?? res.status}`;
+    }
+    const { error: taskErr } = await supabase.from("lifecycle_tasks").insert({
+      type: "consent_declined_review",
+      title: `Address consent declined — review ${declining.parents?.first_name ?? declining.parents?.email ?? "family"}`,
+      description:
+        "This family declined to share their address for their match, so the match was wound down and " +
+        "the child taken out of the matching pool. Action: follow up and handle their ReCharge " +
+        "subscription as appropriate (pause or cancel).",
+      parent_id: declining.parents?.id ?? null,
+      child_id: declining.id,
+      match_id: match.id,
+    });
+    if (!taskErr) out.tasksCreated++;
+  }
+
+  // Partner: back into the queue with priority + a gentle notice (never blaming).
+  if (partner) {
+    await requeueChild({ childId: partner.id, reason: "partner_orphaned", priority: true, actorEmail: actor });
+    if (partner.parents?.email) {
+      const res = await sendEmail({
+        to: partner.parents.email,
+        templateKey: "match_didnt_work_out",
+        vars: {
+          parent_first_name: partner.parents.first_name ?? "",
+          child_first_name: partner.child_first_name ?? "your child",
+        },
+      });
+      if (res.ok) out.emailsSent++;
+    }
+  }
+
+  await supabase.from("matches").update({
+    match_status: "Closed",
+    close_reason: "address_consent_declined",
+    close_reason_code: "consent_declined",
+  }).eq("id", match.id);
+
+  await supabase.from("lifecycle_tasks")
+    .update({ completed: true, completed_at: nowIso, completed_by: actor })
+    .eq("match_id", match.id)
+    .eq("type", "chase_address_confirmation")
+    .eq("completed", false);
+
+  await logAudit({
+    actorEmail: actor,
+    action: "match.address_consent_declined",
+    entityType: "match",
+    entityId: match.id,
+    metadata: { decliningChildId, partnerChildId },
+  });
+
+  out.ok = true;
+  return out;
+}
+
 /**
  * The A4 engine. Scans Pending matches at least 48h old that aren't fully
  * consented yet, and for each does exactly one due action per run (timeout wins

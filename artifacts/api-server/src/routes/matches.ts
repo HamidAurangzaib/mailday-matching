@@ -8,6 +8,7 @@ import { logAudit } from "../lib/audit.js";
 import { computeAge } from "../lib/age.js";
 import { requeueChild } from "../lib/lifecycle.js";
 import { computeSubscriptionMonth, computePriorityTier } from "../lib/subscription.js";
+import { declineAddressConsent } from "./lifecycle-jobs.js";
 
 const router: IRouter = Router();
 
@@ -349,6 +350,39 @@ router.post("/matches", requireAuth, async (req: AuthRequest, res) => {
     });
   } catch (err) {
     req.log?.error({ err }, "Error approving match");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /matches/:id/consent-decline
+//
+// Group A / A4: record that a family has actively declined to share their
+// address for this (Pending) match. Winds the match down — notifies the
+// declining family (consent_declined) + queues a human ReCharge task, requeues
+// the partner with priority + notifies them (match_didnt_work_out). There is no
+// decline button in the consent email by design, so this is the admin-recorded
+// path when a family tells support "no".
+//   Body: { child_id }  — which child's family is declining.
+router.post("/matches/:id/consent-decline", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const matchId = String(req.params["id"] ?? "");
+    const childId = (req.body as { child_id?: string } | undefined)?.child_id;
+    if (!childId) {
+      res.status(400).json({ error: "child_id is required" });
+      return;
+    }
+    const result = await declineAddressConsent(
+      matchId,
+      childId,
+      req.user?.email ?? req.user?.id ?? null,
+    );
+    if (!result.ok) {
+      res.status(400).json(result);
+      return;
+    }
+    res.json(result);
+  } catch (err) {
+    req.log?.error({ err }, "Error declining address consent");
     res.status(500).json({ error: "Internal server error" });
   }
 });
