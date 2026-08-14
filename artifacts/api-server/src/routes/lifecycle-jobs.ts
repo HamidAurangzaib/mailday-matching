@@ -511,6 +511,7 @@ type ConsentMatchRow = {
   address_confirmed_a: boolean | null;
   address_confirmed_b: boolean | null;
   created_at: string;
+  consent_opened_at: string | null;
   consent_reminder_1_sent_at: string | null;
   consent_reminder_2_sent_at: string | null;
   consent_timeout_at: string | null;
@@ -876,7 +877,7 @@ export async function runAddressConsentLifecycle(): Promise<AddressConsentResult
   const { data: matches, error } = await supabase
     .from("matches")
     .select(
-      "id, child_a_id, child_b_id, address_confirmed_a, address_confirmed_b, created_at, " +
+      "id, child_a_id, child_b_id, address_confirmed_a, address_confirmed_b, created_at, consent_opened_at, " +
       "consent_reminder_1_sent_at, consent_reminder_2_sent_at, consent_timeout_at",
     )
     .eq("match_status", "Pending")

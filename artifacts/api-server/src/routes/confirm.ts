@@ -16,6 +16,7 @@ import { consumeConfirmationToken } from "../lib/confirmation.js";
 import { logAudit } from "../lib/audit.js";
 import { emitKlaviyoEvent } from "../lib/klaviyo-events.js";
 import { removePauseReason } from "../lib/pause.js";
+import { reopenMatchForReconsent } from "../lib/match-consent.js";
 
 const router: IRouter = Router();
 
@@ -128,13 +129,18 @@ router.get("/confirm/:token", async (req, res) => {
         }
         const { data: before } = await supabase
           .from("parents")
-          .select("id, email, mailing_address")
+          .select("id, email, mailing_address, address_type")
           .eq("id", consumed.parent_id)
           .single();
 
+        // The self-service move page can carry a chosen address type too.
+        const newAddressType = (consumed.payload["address_type"] as string | undefined)?.trim();
+        const parentUpdate: Record<string, unknown> = { mailing_address: newAddress };
+        if (newAddressType) parentUpdate["address_type"] = newAddressType;
+
         await supabase
           .from("parents")
-          .update({ mailing_address: newAddress })
+          .update(parentUpdate)
           .eq("id", consumed.parent_id);
 
         await logAudit({
@@ -142,20 +148,52 @@ router.get("/confirm/:token", async (req, res) => {
           action: "parent.address_change",
           entityType: "parent",
           entityId: consumed.parent_id,
-          payloadBefore: { mailing_address: before?.mailing_address ?? null },
-          payloadAfter: { mailing_address: newAddress },
+          payloadBefore: {
+            mailing_address: before?.mailing_address ?? null,
+            address_type: before?.address_type ?? null,
+          },
+          payloadAfter: { mailing_address: newAddress, address_type: newAddressType ?? before?.address_type ?? null },
           metadata: { source: "confirmation_link" },
           req,
         });
 
+        // Item 3 (family moves): if this parent's child is in a live match, the
+        // pen pal's family must be told and BOTH sides must consent again before
+        // anything is sent to the new address. Re-open each such match through the
+        // A4 consent flow. The old address's letters/consents no longer apply.
+        let reopenedMatches = 0;
+        const { data: kids } = await supabase
+          .from("children")
+          .select("id")
+          .eq("parent_id", consumed.parent_id);
+        const kidIds = (kids ?? []).map((k) => k.id as string);
+        if (kidIds.length > 0) {
+          const inList = `(${kidIds.join(",")})`;
+          const { data: liveMatches } = await supabase
+            .from("matches")
+            .select("id")
+            .in("match_status", ["Active", "Pending"])
+            .or(`child_a_id.in.${inList},child_b_id.in.${inList}`);
+          for (const m of liveMatches ?? []) {
+            const r = await reopenMatchForReconsent(m.id as string, {
+              reason: "family_moved",
+              actorEmail: consumed.email,
+            });
+            if (r.ok) reopenedMatches++;
+            else req.log?.warn({ matchId: m.id, error: r.error }, "Re-consent reopen failed after move");
+          }
+        }
+
         req.log?.info(
-          { parentId: consumed.parent_id },
+          { parentId: consumed.parent_id, reopenedMatches },
           "Address change confirmed via email link",
         );
         res.send(
           SUCCESS(
             "Address updated",
-            "Your mailing address has been updated. The next pack will go to the new address.",
+            reopenedMatches > 0
+              ? "Your mailing address has been updated. Because your child is matched, both families are being asked to reconfirm before anything is sent to the new address — your child's pen pal family has been notified. Nothing travels until you both say yes again."
+              : "Your mailing address has been updated. The next pack will go to the new address.",
           ),
         );
         return;

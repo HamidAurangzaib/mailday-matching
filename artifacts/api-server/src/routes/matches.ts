@@ -398,7 +398,7 @@ router.get("/admin/consent-status", requireAuth, requireAdmin, async (req: AuthR
     const { data: matches, error } = await supabase
       .from("matches")
       .select(
-        "id, child_a_id, child_b_id, created_at, " +
+        "id, child_a_id, child_b_id, created_at, consent_opened_at, " +
         "address_confirmed_a, address_confirmed_b, address_confirmed_a_at, address_confirmed_b_at, " +
         "consent_reminder_1_sent_at, consent_reminder_2_sent_at, consent_timeout_at",
       )
@@ -416,6 +416,7 @@ router.get("/admin/consent-status", requireAuth, requireAdmin, async (req: AuthR
       child_a_id: string;
       child_b_id: string;
       created_at: string;
+      consent_opened_at: string | null;
       address_confirmed_a: boolean | null;
       address_confirmed_b: boolean | null;
       address_confirmed_a_at: string | null;
@@ -449,7 +450,7 @@ router.get("/admin/consent-status", requireAuth, requireAdmin, async (req: AuthR
     };
 
     const items = rows.map((m) => {
-      const elapsedDays = differenceInDays(now, parseISO(m.created_at as string));
+      const elapsedDays = differenceInDays(now, parseISO((m.consent_opened_at ?? m.created_at) as string));
       const aOk = !!m.address_confirmed_a;
       const bOk = !!m.address_confirmed_b;
       let nextStep: string;

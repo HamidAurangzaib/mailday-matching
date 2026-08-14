@@ -64,5 +64,13 @@ expect("both confirmed at 3 days", decideConsentAction(row(3 * D, { address_conf
 expect("one confirmed, 3 days", decideConsentAction(row(3 * D, { address_confirmed_a: true }), NOW), "reminder1");
 expect("one confirmed, 14 days", decideConsentAction(row(14 * D, { address_confirmed_a: true }), NOW), "timeout");
 
+// Family-moves reopen: the clock restarts at consent_opened_at, NOT created_at.
+// A long-Active match reopened yesterday must not instantly time out.
+const opened = (agoMs: number) => new Date(NOW - agoMs).toISOString();
+expect("reopened 1 day ago (created 60d)", decideConsentAction(row(60 * D, { consent_opened_at: opened(1 * D) }), NOW), "none");
+expect("reopened 3 days ago (created 60d)", decideConsentAction(row(60 * D, { consent_opened_at: opened(3 * D) }), NOW), "reminder1");
+expect("reopened 8 days ago (created 60d)", decideConsentAction(row(60 * D, { consent_opened_at: opened(8 * D) }), NOW), "reminder2");
+expect("reopened 15 days ago (created 60d)", decideConsentAction(row(60 * D, { consent_opened_at: opened(15 * D) }), NOW), "timeout");
+
 console.log(`\nconsent-timing: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

@@ -18,9 +18,19 @@ export interface ConsentTimingRow {
   address_confirmed_a: boolean | null;
   address_confirmed_b: boolean | null;
   created_at: string;
+  /** Set when a match re-opens for re-consent (a move); the clock restarts here. */
+  consent_opened_at?: string | null;
   consent_reminder_1_sent_at: string | null;
   consent_reminder_2_sent_at: string | null;
   consent_timeout_at: string | null;
+}
+
+/**
+ * When the current consent window started: the re-consent reopen time if the
+ * match has been reopened (a move), otherwise the match's creation time.
+ */
+export function consentWindowStart(row: Pick<ConsentTimingRow, "created_at" | "consent_opened_at">): number {
+  return new Date(row.consent_opened_at ?? row.created_at).getTime();
 }
 
 export type ConsentAction = "timeout" | "reminder2" | "reminder1" | "none";
@@ -36,7 +46,7 @@ export function decideConsentAction(row: ConsentTimingRow, nowMs: number): Conse
   if (row.address_confirmed_a && row.address_confirmed_b) return "none";
   if (row.consent_timeout_at) return "none";
 
-  const elapsedMs = nowMs - new Date(row.created_at).getTime();
+  const elapsedMs = nowMs - consentWindowStart(row);
   if (elapsedMs >= CONSENT_TIMEOUT_DAYS * 86400000) return "timeout";
   if (elapsedMs >= CONSENT_REMINDER_2_DAYS * 86400000 && !row.consent_reminder_2_sent_at) return "reminder2";
   // Once reminder-2 has gone out, reminder-1 is moot — guard on it too so the
