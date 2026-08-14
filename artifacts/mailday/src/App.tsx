@@ -27,6 +27,7 @@ import PendingAddresses from "@/pages/pending-addresses";
 import ConsentStatus from "@/pages/consent-status";
 import Onboarding from "@/pages/onboarding";
 import Enroll from "@/pages/enroll";
+import AddressChange from "@/pages/address-change";
 import VAPerformance from "@/pages/va-performance";
 import GiveAKeyApply from "@/pages/give-a-key-apply";
 import GiveAKeyPoBox from "@/pages/give-a-key-po-box";
@@ -134,6 +135,7 @@ function Router() {
       <Route path="/performance" component={VAPerformancePage} />
       <Route path="/onboarding" component={Onboarding} />
       <Route path="/enroll" component={Enroll} />
+      <Route path="/address-change" component={AddressChange} />
       <Route path="/give-a-key/apply" component={GiveAKeyApply} />
       <Route path="/give-a-key/po-box" component={GiveAKeyPoBox} />
       <Route path="/give-a-key" component={GiveAKeyDashboardPage} />
