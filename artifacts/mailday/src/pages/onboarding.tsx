@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { CheckCircle2, Loader2, AlertCircle, Cake, Plus, Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import { Turnstile } from "@/components/turnstile";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -376,6 +377,9 @@ export default function Onboarding() {
   const toggleAttestation = (i: number) =>
     setAttested((prev) => prev.map((v, idx) => (idx === i ? !v : v)));
 
+  // A5 — Turnstile bot check (token sent with the first submit call).
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+
   const updateChild = (uid: string, updates: Partial<ChildForm>) => {
     setChildren((prev) => prev.map((c) => c.uid === uid ? { ...c, ...updates } : c));
   };
@@ -401,7 +405,7 @@ export default function Onboarding() {
   const canSubmit = children.every((c) => {
     const age = calcAge(c.date_of_birth);
     return c.child_first_name.trim().length > 0 && age !== null;
-  }) && allAttested && !submitting;
+  }) && allAttested && !!turnstileToken && !submitting;
 
   const handleSubmit = async () => {
     if (!canSubmit || !token) return;
@@ -414,7 +418,7 @@ export default function Onboarding() {
     try {
       await customFetch(`/api/onboarding/${token}/attestation`, {
         method: "POST",
-        body: JSON.stringify({ agreed: true }),
+        body: JSON.stringify({ agreed: true, turnstile_token: turnstileToken }),
       });
     } catch (err) {
       setSubmitting(false);
@@ -633,6 +637,9 @@ export default function Onboarding() {
           </div>
         </div>
 
+        {/* A5 — bot check */}
+        <Turnstile onVerify={setTurnstileToken} />
+
         {/* Global error */}
         {globalError && (
           <div className="flex items-start gap-2 text-destructive text-sm bg-destructive/10 p-3 rounded-lg">
@@ -644,9 +651,11 @@ export default function Onboarding() {
         {/* Validation nudge */}
         {!canSubmit && !submitting && (
           <p className="text-xs text-center text-gray-400">
-            {children.every((c) => c.child_first_name.trim() && calcAge(c.date_of_birth) !== null) && !allAttested
+            {!(children.every((c) => c.child_first_name.trim() && calcAge(c.date_of_birth) !== null))
+              ? "Please fill in a name and date of birth for each child before submitting."
+              : !allAttested
               ? "Please check all four boxes above to continue."
-              : "Please fill in a name and date of birth for each child before submitting."}
+              : "Please complete the verification above to continue."}
           </p>
         )}
 

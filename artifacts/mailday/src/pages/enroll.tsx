@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { customFetch } from "@workspace/api-client-react";
+import { Turnstile } from "@/components/turnstile";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -326,6 +327,7 @@ export default function Enroll() {
   const [submitted, setSubmitted] = useState(false);
   const [submittedNames, setSubmittedNames] = useState<string[]>(["Emma"]);
   const [globalError, setGlobalError] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null); // A5
 
   const updateChild = (uid: string, updates: Partial<ChildForm>) =>
     setChildren((prev) => prev.map((c) => c.uid === uid ? { ...c, ...updates } : c));
@@ -342,7 +344,7 @@ export default function Enroll() {
   const emailValid = email.trim().includes("@") && email.trim().includes(".");
   const addressValid = !!(addrType && addrLine1.trim() && addrCity.trim() && addrState.trim() && addrZip.trim());
   const childrenValid = children.every((c) => c.child_first_name.trim() && calcAge(c.date_of_birth) !== null);
-  const canSubmit = emailValid && addressValid && childrenValid && !submitting;
+  const canSubmit = emailValid && addressValid && childrenValid && !!turnstileToken && !submitting;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -357,6 +359,7 @@ export default function Enroll() {
         body: JSON.stringify({
           email: email.trim().toLowerCase(),
           mailing_address: mailingAddress || undefined,
+          turnstile_token: turnstileToken,
           children: children.map((c) => ({
             child_first_name: c.child_first_name.trim(),
             date_of_birth: c.date_of_birth,
@@ -543,6 +546,9 @@ export default function Enroll() {
           </div>
         )}
 
+        {/* A5 — bot check */}
+        <Turnstile onVerify={setTurnstileToken} />
+
         {/* Hint */}
         {!canSubmit && !submitting && (
           <p className="text-sm text-center text-[#8B6F5E]">
@@ -550,7 +556,9 @@ export default function Enroll() {
               ? "Enter your subscription email address to continue."
               : !addressValid
               ? "Please enter the mailing address where letters should be delivered."
-              : "Fill in a name and birthday for each child to submit."}
+              : !childrenValid
+              ? "Fill in a name and birthday for each child to submit."
+              : "Please complete the verification above to continue."}
           </p>
         )}
 

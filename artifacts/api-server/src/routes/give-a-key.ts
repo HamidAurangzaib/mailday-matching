@@ -4,6 +4,7 @@ import { requireAuth, requireAdmin, type AuthRequest } from "../middlewares/auth
 import { createConfirmationToken } from "../lib/confirmation.js";
 import { sendEmail } from "../lib/email.js";
 import { emitKlaviyoEvent } from "../lib/klaviyo-events.js";
+import { verifyTurnstile, tokenFromBody } from "../lib/turnstile.js";
 
 const router: IRouter = Router();
 
@@ -57,6 +58,14 @@ async function createTask(
 // POST /api/give-a-key/apply
 router.post("/give-a-key/apply", async (req, res) => {
   try {
+    // A5: bot protection.
+    const turnstile = await verifyTurnstile(tokenFromBody(req.body), req.ip);
+    if (!turnstile.ok) {
+      req.log?.warn({ reason: turnstile.reason }, "GAK apply: Turnstile verification failed");
+      res.status(400).json({ error: "Bot verification failed. Please refresh the page and try again." });
+      return;
+    }
+
     const body = req.body as {
       parent_first_name: string;
       parent_last_name: string;

@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { supabase } from "../lib/supabase.js";
 import { differenceInDays, parseISO } from "date-fns";
 import { computeAge, computeTier } from "../lib/age.js";
+import { verifyTurnstile, tokenFromBody } from "../lib/turnstile.js";
 
 const router: IRouter = Router();
 
@@ -126,6 +127,16 @@ router.get("/onboarding/:token", async (req, res) => {
 // Idempotent: if already recorded, we keep the original timestamp.
 router.post("/onboarding/:token/attestation", async (req, res) => {
   try {
+    // A5: bot protection — the attestation is the once-per-submit gate for the
+    // onboarding form, so the Turnstile token is verified here (a single token is
+    // consumed once, so we don't re-check it on each per-child call that follows).
+    const turnstile = await verifyTurnstile(tokenFromBody(req.body), req.ip);
+    if (!turnstile.ok) {
+      req.log?.warn({ reason: turnstile.reason }, "Onboarding: Turnstile verification failed");
+      res.status(400).json({ error: "Bot verification failed. Please refresh the page and try again." });
+      return;
+    }
+
     const parent = await loadParentByToken(req.params.token);
     if (!parent) {
       res.status(404).json({ error: "Invalid or expired onboarding link" });

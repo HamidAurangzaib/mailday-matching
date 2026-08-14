@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { customFetch } from "@workspace/api-client-react";
+import { Turnstile } from "@/components/turnstile";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -74,6 +75,7 @@ export default function GiveAKeyApply() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null); // A5
 
   const toggleInterest = (interest: string) => {
     setInterests((prev) =>
@@ -92,7 +94,7 @@ export default function GiveAKeyApply() {
     childFirstName.trim() && ageValid &&
     interests.length > 0 &&
     statementOfNeed.trim().length >= 20 &&
-    poBoxAck && subscriptionAck && !submitting;
+    poBoxAck && subscriptionAck && !!turnstileToken && !submitting;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -115,6 +117,7 @@ export default function GiveAKeyApply() {
           statement_of_need: statementOfNeed.trim(),
           po_box_acknowledgment: true,
           subscription_acknowledgment: true,
+          turnstile_token: turnstileToken,
         }),
       });
       setSubmitted(true);
@@ -380,6 +383,9 @@ export default function GiveAKeyApply() {
             <span>{error}</span>
           </div>
         )}
+
+        {/* A5 — bot check */}
+        <Turnstile onVerify={setTurnstileToken} />
 
         <Button
           size="lg"
