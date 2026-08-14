@@ -22,7 +22,15 @@ import { sendEmail } from "../lib/email.js";
 import { logAudit } from "../lib/audit.js";
 import { differenceInDays, parseISO } from "date-fns";
 import { tierChangeOnAging, isCrossTier } from "../lib/age.js";
-import { offboardFamily } from "../lib/lifecycle.js";
+import { offboardFamily, requeueChild } from "../lib/lifecycle.js";
+import { createConfirmationToken } from "../lib/confirmation.js";
+import { addPauseReason } from "../lib/pause.js";
+import {
+  CONSENT_REMINDER_1_HOURS,
+  CONSENT_REMINDER_2_DAYS,
+  CONSENT_TIMEOUT_DAYS,
+  decideConsentAction,
+} from "../lib/consent-timing.js";
 import { emitKlaviyoEvent } from "../lib/klaviyo-events.js";
 import { computeSubscriptionMonth } from "../lib/subscription.js";
 import { appBaseUrl } from "../lib/app-url.js";
@@ -463,6 +471,346 @@ export async function runChaseAddressConfirmation(): Promise<ChaseAddressResult>
   return result;
 }
 
+// ─── Group A / A4: two-party address-consent reminders + day-14 timeout ──────
+//
+// Once a match is created it sits in `Pending` until BOTH parents consent to
+// share their mailing address (routes/confirm.ts records each consent and only
+// promotes to Active — releasing the addresses — when both have said yes). This
+// engine works that waiting period:
+//   • 48h  — remind whoever hasn't consented (consent_reminder_1, from Poppy)
+//   • day 7 — remind again, this time showing the address on file (consent_reminder_2)
+//   • day 14 — give up safely: pause the non-responsive family's billing (locally,
+//     via the pause-reasons model + a human "pause ReCharge" task — the app never
+//     touches ReCharge directly), free the family that DID consent back into the
+//     queue with priority, tell each side what happened, and close the match. No
+//     address is ever released without both consents.
+//
+// Timing is measured from matches.created_at (both notification emails go out at
+// creation). Idempotency: three stamp columns on `matches`
+// (consent_reminder_1_sent_at / _2_sent_at / consent_timeout_at) gate each step
+// to fire once. The cron runs every 4 hours so the boundaries aren't missed by
+// more than a few hours (mirrors finalise-cancellations). The timing thresholds
+// + the "which step is due" decision live in lib/consent-timing.ts (pure +
+// unit-tested); this file owns the I/O around them.
+
+export interface AddressConsentResult {
+  scanned: number;
+  reminder1Sent: number;
+  reminder2Sent: number;
+  timedOut: number;
+  emailsSent: number;
+  tasksCreated: number;
+  errors: string[];
+  ranAt: string;
+}
+
+type ConsentMatchRow = {
+  id: string;
+  child_a_id: string;
+  child_b_id: string;
+  address_confirmed_a: boolean | null;
+  address_confirmed_b: boolean | null;
+  created_at: string;
+  consent_reminder_1_sent_at: string | null;
+  consent_reminder_2_sent_at: string | null;
+  consent_timeout_at: string | null;
+};
+
+type ConsentSide = {
+  id: string;
+  child_first_name: string | null;
+  parents: {
+    id: string;
+    first_name: string | null;
+    email: string | null;
+    mailing_address: string | null;
+    address_type: string | null;
+  } | null;
+};
+
+/** "Home, 123 Maple St" — the address line shown in the day-7 reminder. */
+function fmtConsentAddress(type: string | null | undefined, addr: string | null | undefined): string {
+  const a = (addr ?? "").trim();
+  const t = (type ?? "").trim();
+  if (a && t) return `${t}, ${a}`;
+  return a || "the address on file";
+}
+
+async function loadConsentSides(
+  childAId: string,
+  childBId: string,
+): Promise<{ a: ConsentSide | null; b: ConsentSide | null }> {
+  const [aRes, bRes] = await Promise.all([
+    supabase.from("children")
+      .select("id, child_first_name, parents(id, first_name, email, mailing_address, address_type)")
+      .eq("id", childAId).single(),
+    supabase.from("children")
+      .select("id, child_first_name, parents(id, first_name, email, mailing_address, address_type)")
+      .eq("id", childBId).single(),
+  ]);
+  return {
+    a: (aRes.data as unknown as ConsentSide) ?? null,
+    b: (bRes.data as unknown as ConsentSide) ?? null,
+  };
+}
+
+/**
+ * Send reminder `stage` (1 = 48h from Poppy, 2 = day-7 from MailDay) to whichever
+ * side(s) of a Pending match have NOT consented yet. Mints a fresh consent link
+ * per recipient (carrying the pen pal's name so the eventual consent record is
+ * complete). Returns how many emails actually went out.
+ */
+async function sendConsentReminders(
+  match: ConsentMatchRow,
+  sides: { a: ConsentSide | null; b: ConsentSide | null },
+  stage: 1 | 2,
+  errors: string[],
+): Promise<number> {
+  const recipients: Array<{ side: "a" | "b"; own: ConsentSide | null; penpal: ConsentSide | null }> = [];
+  if (!match.address_confirmed_a) recipients.push({ side: "a", own: sides.a, penpal: sides.b });
+  if (!match.address_confirmed_b) recipients.push({ side: "b", own: sides.b, penpal: sides.a });
+
+  let sent = 0;
+  for (const r of recipients) {
+    const parent = r.own?.parents;
+    if (!parent?.email || !r.own || !r.penpal) {
+      errors.push(`reminder${stage}: match ${match.id} side ${r.side} missing parent/child`);
+      continue;
+    }
+    const penpalName = r.penpal.child_first_name ?? "their pen pal";
+    const { url } = await createConfirmationToken({
+      type: "address_confirm_match",
+      email: parent.email,
+      parentId: parent.id,
+      childId: r.own.id,
+      matchId: match.id,
+      payload: { side: r.side, penpal_first_name: penpalName },
+    });
+    const vars: Record<string, string | number> = stage === 1
+      ? {
+          child_first_name: r.own.child_first_name ?? "your child",
+          penpal_first_name: penpalName,
+          consent_url: url,
+        }
+      : {
+          parent_first_name: parent.first_name ?? "",
+          child_first_name: r.own.child_first_name ?? "your child",
+          penpal_first_name: penpalName,
+          full_address: fmtConsentAddress(parent.address_type, parent.mailing_address),
+          consent_url: url,
+        };
+    const res = await sendEmail({
+      to: parent.email,
+      templateKey: stage === 1 ? "consent_reminder_1" : "consent_reminder_2",
+      vars,
+    });
+    if (res.ok) sent++;
+    else errors.push(`reminder${stage} send failed for ${parent.email}: ${res.error ?? res.status}`);
+  }
+  return sent;
+}
+
+/**
+ * Day-14 wind-down. For each side that never consented: pause them locally +
+ * queue a human ReCharge-pause task + email consent_pause with a reactivate link,
+ * and park their child out of the dead match. For a side that DID consent (the
+ * wronged partner, if any): requeue with priority + email match_didnt_work_out.
+ * Then close the match and stamp consent_timeout_at so this runs exactly once.
+ */
+async function handleAddressConsentTimeout(
+  match: ConsentMatchRow,
+  sides: { a: ConsentSide | null; b: ConsentSide | null },
+  result: AddressConsentResult,
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const today = nowIso.split("T")[0];
+
+  const parties: Array<{ confirmed: boolean; own: ConsentSide | null }> = [
+    { confirmed: !!match.address_confirmed_a, own: sides.a },
+    { confirmed: !!match.address_confirmed_b, own: sides.b },
+  ];
+
+  for (const p of parties) {
+    if (!p.own) continue;
+    const parent = p.own.parents;
+
+    if (!p.confirmed) {
+      // This family never consented — pause them (local pause-reasons + a human
+      // ReCharge task; the app never pauses ReCharge itself), park their child
+      // out of the closed match with a fresh guarantee clock (so the breach cron
+      // doesn't immediately pounce), and email them a reactivate link.
+      await addPauseReason(p.own.id, "address_consent");
+      await supabase.from("children")
+        .update({ match_status: "Unmatched", match_guarantee_start_date: today })
+        .eq("id", p.own.id);
+
+      if (parent?.email) {
+        const { url: reactivateUrl } = await createConfirmationToken({
+          type: "reactivate",
+          email: parent.email,
+          parentId: parent.id,
+          childId: p.own.id,
+          matchId: match.id,
+          payload: { source: "consent_pause" },
+        });
+        const res = await sendEmail({
+          to: parent.email,
+          templateKey: "consent_pause",
+          vars: {
+            parent_first_name: parent.first_name ?? "",
+            child_first_name: p.own.child_first_name ?? "your child",
+            reactivate_url: reactivateUrl,
+          },
+        });
+        if (res.ok) result.emailsSent++;
+        else result.errors.push(`consent_pause send failed for ${parent.email}: ${res.error ?? res.status}`);
+      }
+
+      const { error: taskErr } = await supabase.from("lifecycle_tasks").insert({
+        type: "consent_timeout_pause",
+        title: `Address consent timed out — pause ReCharge for ${parent?.first_name ?? parent?.email ?? "family"}`,
+        description:
+          "This family did not consent to share their address within 14 days, so the match was wound down. " +
+          "The app has paused their billing locally (pause reason 'address_consent') and emailed a reactivate link. " +
+          "Action: log into ReCharge and pause this family's subscription. Resume it if/when they reactivate.",
+        parent_id: parent?.id ?? null,
+        child_id: p.own.id,
+        match_id: match.id,
+      });
+      if (taskErr) result.errors.push(`consent_timeout task failed for match ${match.id}: ${taskErr.message}`);
+      else result.tasksCreated++;
+    } else if (parent?.email) {
+      // This family said yes — free them back into the queue with priority, and
+      // let them know it didn't work out (never blaming the other family).
+      await requeueChild({
+        childId: p.own.id,
+        reason: "partner_orphaned",
+        priority: true,
+        actorEmail: "system:address-consent-timeout",
+      });
+      const res = await sendEmail({
+        to: parent.email,
+        templateKey: "match_didnt_work_out",
+        vars: {
+          parent_first_name: parent.first_name ?? "",
+          child_first_name: p.own.child_first_name ?? "your child",
+        },
+      });
+      if (res.ok) result.emailsSent++;
+      else result.errors.push(`match_didnt_work_out send failed for ${parent.email}: ${res.error ?? res.status}`);
+    }
+  }
+
+  // Wind the match down and stamp the timeout so this fires exactly once.
+  await supabase.from("matches").update({
+    match_status: "Closed",
+    close_reason: "address_consent_timeout",
+    close_reason_code: "consent_timeout",
+    consent_timeout_at: nowIso,
+  }).eq("id", match.id);
+
+  // Any open "chase this address" task is now moot — close it.
+  await supabase.from("lifecycle_tasks")
+    .update({ completed: true, completed_at: nowIso, completed_by: "system:address-consent-timeout" })
+    .eq("match_id", match.id)
+    .eq("type", "chase_address_confirmation")
+    .eq("completed", false);
+
+  await logAudit({
+    actorEmail: "system:address-consent-timeout",
+    action: "match.address_consent_timeout",
+    entityType: "match",
+    entityId: match.id,
+    payloadAfter: {
+      address_confirmed_a: match.address_confirmed_a,
+      address_confirmed_b: match.address_confirmed_b,
+    },
+  });
+  result.timedOut++;
+}
+
+/**
+ * The A4 engine. Scans Pending matches at least 48h old that aren't fully
+ * consented yet, and for each does exactly one due action per run (timeout wins
+ * over reminder-2 wins over reminder-1). Fully idempotent via the stamp columns.
+ */
+export async function runAddressConsentLifecycle(): Promise<AddressConsentResult> {
+  const result: AddressConsentResult = {
+    scanned: 0,
+    reminder1Sent: 0,
+    reminder2Sent: 0,
+    timedOut: 0,
+    emailsSent: 0,
+    tasksCreated: 0,
+    errors: [],
+    ranAt: new Date().toISOString(),
+  };
+
+  const now = Date.now();
+  // Nothing is due before 48h, so only pull matches at least that old.
+  const cutoff48 = new Date(now - CONSENT_REMINDER_1_HOURS * 3600000).toISOString();
+
+  const { data: matches, error } = await supabase
+    .from("matches")
+    .select(
+      "id, child_a_id, child_b_id, address_confirmed_a, address_confirmed_b, created_at, " +
+      "consent_reminder_1_sent_at, consent_reminder_2_sent_at, consent_timeout_at",
+    )
+    .eq("match_status", "Pending")
+    .lte("created_at", cutoff48);
+
+  if (error) {
+    result.errors.push(`Failed to load pending matches: ${error.message}`);
+    return result;
+  }
+  if (!matches || matches.length === 0) {
+    logger.info(result, "Address-consent cron: nothing due");
+    return result;
+  }
+
+  for (const row of matches as unknown as ConsentMatchRow[]) {
+    // A fully-consented match promotes to Active in confirm.ts; an already
+    // wound-down one is done. Skip both (don't count them as scanned).
+    if (row.address_confirmed_a && row.address_confirmed_b) continue;
+    if (row.consent_timeout_at) continue;
+
+    result.scanned++;
+    const action = decideConsentAction(row, now);
+    if (action === "none") continue;
+
+    try {
+      const sides = await loadConsentSides(row.child_a_id, row.child_b_id);
+
+      if (action === "timeout") {
+        await handleAddressConsentTimeout(row, sides, result);
+      } else if (action === "reminder2") {
+        const sent = await sendConsentReminders(row, sides, 2, result.errors);
+        result.reminder2Sent += sent;
+        result.emailsSent += sent;
+        // Stamp reminder 2 (and back-fill reminder 1 if the cron only started
+        // running after day 7) so neither re-fires.
+        await supabase.from("matches").update({
+          consent_reminder_2_sent_at: new Date().toISOString(),
+          ...(row.consent_reminder_1_sent_at ? {} : { consent_reminder_1_sent_at: new Date().toISOString() }),
+        }).eq("id", row.id);
+      } else if (action === "reminder1") {
+        const sent = await sendConsentReminders(row, sides, 1, result.errors);
+        result.reminder1Sent += sent;
+        result.emailsSent += sent;
+        await supabase.from("matches").update({
+          consent_reminder_1_sent_at: new Date().toISOString(),
+        }).eq("id", row.id);
+      }
+    } catch (err) {
+      result.errors.push(`exception for match ${row.id}: ${String(err)}`);
+      logger.error({ err, matchId: row.id }, "Address-consent cron: per-match error");
+    }
+  }
+
+  logger.info(result, "Address-consent cron completed");
+  return result;
+}
+
 // ─── Block 3.4: Win-back fails (offboarding trigger) ─────────────────────────
 
 export interface WinbackFailsResult {
@@ -836,6 +1184,7 @@ let chaseAddressJob: ReturnType<typeof cron.schedule> | null = null;
 let winbackFailsJob: ReturnType<typeof cron.schedule> | null = null;
 let agingJob: ReturnType<typeof cron.schedule> | null = null;
 let finaliseCancellationsJob: ReturnType<typeof cron.schedule> | null = null;
+let addressConsentJob: ReturnType<typeof cron.schedule> | null = null;
 let packDueJob: ReturnType<typeof cron.schedule> | null = null;
 
 /** Start both daily lifecycle crons at 9 AM Mountain. */
@@ -895,6 +1244,17 @@ export function startLifecycleCrons(): void {
     },
     { timezone: "America/Denver" },
   );
+  // Address-consent reminders + day-14 timeout. Every 4 hours (9:35, 13:35, …)
+  // so the 48h / day-7 / day-14 boundaries aren't missed by more than a few hours.
+  addressConsentJob = cron.schedule(
+    "35 */4 * * *",
+    () => {
+      void runAddressConsentLifecycle().catch((err) =>
+        logger.error({ err }, "Address-consent cron failed"),
+      );
+    },
+    { timezone: "America/Denver" },
+  );
   // Monthly packs: 00:30 MT on the 1st of every month. Fired early so Klaviyo
   // receives the pack_due events at the start of the day and can hold each email
   // until 8am in the recipient's own timezone.
@@ -906,7 +1266,7 @@ export function startLifecycleCrons(): void {
     { timezone: "America/Denver" },
   );
   logger.info(
-    "Lifecycle crons scheduled (9:00, 9:05, 9:10, 9:15, 9:20 daily + finalise every 4h + pack_due 00:30 on the 1st — America/Denver)",
+    "Lifecycle crons scheduled (9:00, 9:05, 9:10, 9:15, 9:20 daily + finalise every 4h + address-consent every 4h + pack_due 00:30 on the 1st — America/Denver)",
   );
 }
 
@@ -917,6 +1277,7 @@ export function stopLifecycleCrons(): void {
   winbackFailsJob?.stop();
   agingJob?.stop();
   finaliseCancellationsJob?.stop();
+  addressConsentJob?.stop();
   packDueJob?.stop();
   nudgeJob = null;
   breachJob = null;
@@ -924,6 +1285,7 @@ export function stopLifecycleCrons(): void {
   winbackFailsJob = null;
   agingJob = null;
   finaliseCancellationsJob = null;
+  addressConsentJob = null;
   packDueJob = null;
 }
 
@@ -972,6 +1334,17 @@ router.post(
   async (req: AuthRequest, res) => {
     req.log?.info({ by: req.user?.email }, "Manual winback-fails run triggered");
     const result = await runWinbackFailsOffboarding();
+    res.json(result);
+  },
+);
+
+router.post(
+  "/admin/lifecycle/address-consent/run",
+  requireAuth,
+  requireAdmin,
+  async (req: AuthRequest, res) => {
+    req.log?.info({ by: req.user?.email }, "Manual address-consent run triggered");
+    const result = await runAddressConsentLifecycle();
     res.json(result);
   },
 );

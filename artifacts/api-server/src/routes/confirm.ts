@@ -15,6 +15,7 @@ import { supabase } from "../lib/supabase.js";
 import { consumeConfirmationToken } from "../lib/confirmation.js";
 import { logAudit } from "../lib/audit.js";
 import { emitKlaviyoEvent } from "../lib/klaviyo-events.js";
+import { removePauseReason } from "../lib/pause.js";
 
 const router: IRouter = Router();
 
@@ -426,23 +427,61 @@ router.get("/confirm/:token", async (req, res) => {
       }
 
       case "reactivate": {
-        // Payload: {}. Phase 4 / day-30 win-back. For Phase 1 we just stamp
-        // intent and audit; the reactivation flow itself is built later.
+        // Payload: {} (Phase 4 / day-30 win-back — still just stamps intent), OR
+        // { source: 'consent_pause' } (Group A / A4): a family paused because they
+        // didn't consent to share their address in time is opting back in. Clear
+        // the 'address_consent' pause (which resumes billing locally once no other
+        // reason remains), put the child back in the matching pool, and flag the
+        // team to resume ReCharge — so the paused-forever gap can't happen.
         if (!consumed.parent_id) {
           res.status(400).send(FAIL("This link is missing a parent reference."));
           return;
         }
+        const reactivateSource = consumed.payload["source"] as string | undefined;
+
+        if (reactivateSource === "consent_pause" && consumed.child_id) {
+          const today = new Date().toISOString().split("T")[0];
+          await removePauseReason(consumed.child_id, "address_consent");
+          await supabase
+            .from("children")
+            .update({ match_status: "Unmatched", match_guarantee_start_date: today })
+            .eq("id", consumed.child_id);
+
+          const { data: taskExists } = await supabase
+            .from("lifecycle_tasks")
+            .select("id")
+            .eq("type", "consent_reactivated")
+            .eq("child_id", consumed.child_id)
+            .eq("completed", false)
+            .maybeSingle();
+          if (!taskExists) {
+            await supabase.from("lifecycle_tasks").insert({
+              type: "consent_reactivated",
+              title: "Family reactivated after a consent timeout — resume ReCharge",
+              description:
+                "This family clicked the reactivate link after their match was wound down for not " +
+                "consenting to share an address in time. The app has cleared the local pause and put " +
+                "the child back in the matching pool. Action: resume this family's ReCharge subscription.",
+              parent_id: consumed.parent_id,
+              child_id: consumed.child_id,
+            });
+          }
+        }
+
         await logAudit({
           actorEmail: consumed.email,
           action: "parent.reactivate_clicked",
           entityType: "parent",
           entityId: consumed.parent_id,
+          metadata: { source: reactivateSource ?? null, childId: consumed.child_id },
           req,
         });
         res.send(
           SUCCESS(
             "Welcome back",
-            "We've noted your interest. Courtney will be in touch shortly to reactivate your membership.",
+            reactivateSource === "consent_pause"
+              ? "Thank you — you're back in. We've lifted the pause and your child is back in line for a pen pal. Courtney will confirm your billing is running again."
+              : "We've noted your interest. Courtney will be in touch shortly to reactivate your membership.",
           ),
         );
         return;
