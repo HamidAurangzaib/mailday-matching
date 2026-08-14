@@ -11,6 +11,22 @@ import { computeSubscriptionMonth, computePriorityTier } from "../lib/subscripti
 
 const router: IRouter = Router();
 
+/**
+ * The "address we hold for you" line a parent sees on the consent screen (A3).
+ * Combines the address type they chose at onboarding ("Home" / "PO Box" / …)
+ * with the mailing address itself: e.g. "Home, 123 Maple St, Springfield IL".
+ * Falls back gracefully so the email never renders a bare blank.
+ */
+function buildFullAddress(
+  addressType: string | null | undefined,
+  mailingAddress: string | null | undefined,
+): string {
+  const addr = (mailingAddress ?? "").trim();
+  const type = (addressType ?? "").trim();
+  if (addr && type) return `${type}, ${addr}`;
+  return addr || "(no address on file yet — please reply to this email so we can add it)";
+}
+
 function computeGuarantee(child: Record<string, unknown>) {
   if (!child.match_guarantee_start_date) return { days_waiting: null, guarantee_status: null };
   const days_waiting = differenceInDays(new Date(), parseISO(child.match_guarantee_start_date as string));
@@ -143,12 +159,12 @@ router.post("/matches", requireAuth, async (req: AuthRequest, res) => {
     const [aResult, bResult] = await Promise.all([
       supabase
         .from("children")
-        .select("id, child_first_name, date_of_birth, age, interests, billing_paused, created_date, parents(id, first_name, email)")
+        .select("id, child_first_name, date_of_birth, age, interests, billing_paused, created_date, parents(id, first_name, email, mailing_address, address_type)")
         .eq("id", child_a_id)
         .single(),
       supabase
         .from("children")
-        .select("id, child_first_name, date_of_birth, age, interests, billing_paused, created_date, parents(id, first_name, email)")
+        .select("id, child_first_name, date_of_birth, age, interests, billing_paused, created_date, parents(id, first_name, email, mailing_address, address_type)")
         .eq("id", child_b_id)
         .single(),
     ]);
@@ -166,7 +182,13 @@ router.post("/matches", requireAuth, async (req: AuthRequest, res) => {
       interests: string[] | null;
       billing_paused: boolean | null;
       created_date: string | null;
-      parents: { id: string; first_name: string | null; email: string } | null;
+      parents: {
+        id: string;
+        first_name: string | null;
+        email: string;
+        mailing_address: string | null;
+        address_type: string | null;
+      } | null;
     };
     const childA = aResult.data as unknown as ChildRow;
     const childB = bResult.data as unknown as ChildRow;
@@ -245,7 +267,9 @@ router.post("/matches", requireAuth, async (req: AuthRequest, res) => {
         parentId: ownChild.parents!.id,
         matchId: match.id,
         childId: ownChild.id,
-        payload: { side },
+        // A3: carry the pen pal's name so confirm.ts can record the exact
+        // consent button text (incl. the name) in match_consents.
+        payload: { side, penpal_first_name: penPal.child_first_name },
       });
 
       // Fun facts = first 3 interests of the pen pal.
@@ -255,6 +279,13 @@ router.post("/matches", requireAuth, async (req: AuthRequest, res) => {
       // Pen pal age — prefer the DOB-computed value over the stored legacy age.
       const penPalAge =
         computeAge(penPal.date_of_birth) ?? penPal.age ?? "?";
+
+      // A3: the notification IS the consent screen. Show the parent the exact
+      // address we'll share (their own), and gate release on both sides saying yes.
+      const fullAddress = buildFullAddress(
+        ownChild.parents!.address_type,
+        ownChild.parents!.mailing_address,
+      );
 
       const sendRes = await sendEmail({
         to: parentEmail,
@@ -267,6 +298,7 @@ router.post("/matches", requireAuth, async (req: AuthRequest, res) => {
           fun_fact_1: facts[0],
           fun_fact_2: facts[1],
           fun_fact_3: facts[2],
+          full_address: fullAddress,
           confirm_address_url: confirmUrl,
           pack_url: "https://joinmailday.com/packs", // placeholder — link refinement is a copy task for Courtney
         },
@@ -523,16 +555,19 @@ router.post(
 
       const [aResult, bResult] = await Promise.all([
         supabase.from("children")
-          .select("id, child_first_name, date_of_birth, age, interests, parents(id, first_name, email)")
+          .select("id, child_first_name, date_of_birth, age, interests, parents(id, first_name, email, mailing_address, address_type)")
           .eq("id", match.child_a_id).single(),
         supabase.from("children")
-          .select("id, child_first_name, date_of_birth, age, interests, parents(id, first_name, email)")
+          .select("id, child_first_name, date_of_birth, age, interests, parents(id, first_name, email, mailing_address, address_type)")
           .eq("id", match.child_b_id).single(),
       ]);
       type ChildRow = {
         id: string; child_first_name: string; date_of_birth: string | null;
         age: number | null; interests: string[] | null;
-        parents: { id: string; first_name: string | null; email: string } | null;
+        parents: {
+          id: string; first_name: string | null; email: string;
+          mailing_address: string | null; address_type: string | null;
+        } | null;
       };
       const childA = aResult.data as unknown as ChildRow;
       const childB = bResult.data as unknown as ChildRow;
@@ -548,11 +583,15 @@ router.post(
           parentId: ownChild.parents!.id,
           matchId: match.id,
           childId: ownChild.id,
-          payload: { side },
+          payload: { side, penpal_first_name: penPal.child_first_name },
         });
         const facts = (penPal.interests ?? []).slice(0, 3);
         while (facts.length < 3) facts.push("something fun");
         const penPalAge = computeAge(penPal.date_of_birth) ?? penPal.age ?? "?";
+        const fullAddress = buildFullAddress(
+          ownChild.parents!.address_type,
+          ownChild.parents!.mailing_address,
+        );
         const sendRes = await sendEmail({
           to: ownChild.parents!.email,
           templateKey: "match_notification",
@@ -562,6 +601,7 @@ router.post(
             pen_pal_first_name: penPal.child_first_name,
             pen_pal_age: String(penPalAge),
             fun_fact_1: facts[0], fun_fact_2: facts[1], fun_fact_3: facts[2],
+            full_address: fullAddress,
             confirm_address_url: confirmUrl,
             pack_url: "https://joinmailday.com/packs",
           },

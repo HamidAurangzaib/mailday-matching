@@ -4,7 +4,7 @@
  *
  * Token types:
  *   • address_change         — closes audit §3.3 (enroll + GAK PO-box). Payload: { new_address }.
- *   • address_confirm_match  — Phase 2 (match notification). Payload: { side: 'a'|'b' }.
+ *   • address_confirm_match  — Phase 2 (match notification) / A3 two-party consent. Payload: { side: 'a'|'b', penpal_first_name?: string }.
  *   • pause_offer            — Phase 3 (pause vs cancel). Payload: { months: 1|2|3 } or { decline: true }.
  *   • reactivate             — Phase 4 (day-30 win-back). Payload: {}.
  *
@@ -34,7 +34,7 @@ export interface CreateTokenArgs {
 
 const DEFAULT_TTL_HOURS: Record<ConfirmationType, number> = {
   address_change: 24,
-  address_confirm_match: 168, // 1 week — parent might not click immediately
+  address_confirm_match: 15 * 24, // 15 days — covers the whole A4 consent window (48h + day-7 reminder + day-14 timeout) so the original link never dies mid-flow
   pause_offer: 48,
   reactivate: 30 * 24, // 30 days
 };

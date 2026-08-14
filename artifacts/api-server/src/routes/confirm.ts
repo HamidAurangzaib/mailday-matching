@@ -18,6 +18,10 @@ import { emitKlaviyoEvent } from "../lib/klaviyo-events.js";
 
 const router: IRouter = Router();
 
+// Version stamp stored on every A3 consent record. Bump when the consent wording
+// or legal meaning changes, so old records stay attributable to what was shown.
+const CONSENT_VERSION = "a3-2026-08";
+
 // ─── Tiny HTML page helper ────────────────────────────────────────────────────
 
 function htmlPage(title: string, body: string, primaryColor = "#DD4B39"): string {
@@ -175,7 +179,41 @@ router.get("/confirm/:token", async (req, res) => {
 
         await supabase.from("matches").update(updateFields).eq("id", consumed.match_id);
 
-        // If both sides confirmed, promote to Active.
+        // A3: this click is a two-party address-sharing consent, not just a
+        // confirmation. Record it as the legal artifact — the exact button text
+        // the parent saw (incl. the pen pal's name), the version, the IP. One
+        // row per parent per match (UNIQUE(match_id,parent_id)), so a re-click
+        // is a harmless no-op rather than a duplicate.
+        const penpalFirstName =
+          (consumed.payload["penpal_first_name"] as string | undefined)?.trim() || "";
+        const consentButtonText = penpalFirstName
+          ? `I consent to share my mailing address with ${penpalFirstName}'s family`
+          : "I consent to share my mailing address with my child's pen pal's family";
+        if (consumed.parent_id) {
+          const { error: consentErr } = await supabase
+            .from("match_consents")
+            .upsert(
+              {
+                match_id: consumed.match_id,
+                parent_id: consumed.parent_id,
+                child_id: consumed.child_id,
+                consented_at: nowIso,
+                button_text: consentButtonText,
+                penpal_first_name: penpalFirstName || null,
+                version: CONSENT_VERSION,
+                consented_ip: req.ip ?? null,
+              },
+              { onConflict: "match_id,parent_id", ignoreDuplicates: true },
+            );
+          if (consentErr) {
+            req.log?.error(
+              { consentErr, matchId: consumed.match_id, parentId: consumed.parent_id },
+              "Failed to record match consent",
+            );
+          }
+        }
+
+        // Release addresses only once BOTH sides have consented — promote to Active.
         const { data: match } = await supabase
           .from("matches")
           .select("id, address_confirmed_a, address_confirmed_b, match_status")
@@ -292,19 +330,23 @@ router.get("/confirm/:token", async (req, res) => {
 
         await logAudit({
           actorEmail: consumed.email,
-          action: "match.address_confirmed",
+          action: "match.address_consent_recorded",
           entityType: "match",
           entityId: consumed.match_id,
-          payloadAfter: { side, promoted_to_active: promoted },
+          payloadAfter: { side, consent_version: CONSENT_VERSION, both_consented: promoted },
           req,
         });
 
         res.send(
           SUCCESS(
-            "Address confirmed",
+            "Thank you — consent recorded",
             promoted
-              ? "Both addresses are confirmed — your child's pen pal match is now live. The first pack ships next."
-              : "Your address is confirmed. We're waiting on the other family to confirm theirs; you'll hear from us as soon as they do.",
+              ? `Both families have said yes to sharing addresses, so your child's pen pal match is now live${
+                  penpalFirstName ? ` with ${penpalFirstName}'s family` : ""
+                }. The first pack ships next.`
+              : `Thank you — you've said yes to sharing your address${
+                  penpalFirstName ? ` with ${penpalFirstName}'s family` : ""
+                }. Nothing travels in either direction until the other family says yes too; we'll email you the moment they do.`,
           ),
         );
         return;

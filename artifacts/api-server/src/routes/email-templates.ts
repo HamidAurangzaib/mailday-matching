@@ -174,6 +174,7 @@ const SAMPLE_VARS: Record<string, Record<string, string>> = {
     fun_fact_1: "Lego",
     fun_fact_2: "Dinosaurs",
     fun_fact_3: "Reading",
+    full_address: "Home, 123 Maple St, Springfield IL 62701",
     pack_url: "https://example.test/packs",
     confirm_address_url: "https://example.test/api/confirm/demo-token",
   },
