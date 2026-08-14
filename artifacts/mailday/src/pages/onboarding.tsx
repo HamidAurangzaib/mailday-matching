@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useSearch } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { customFetch } from "@workspace/api-client-react";
@@ -44,6 +44,8 @@ interface Parent {
   last_name: string;
   email: string;
   membership_tier: string | null;
+  mailing_address?: string | null;
+  address_type?: string | null;
   /** Memberships this family purchased and hasn't assigned to a child yet. */
   available_memberships?: Membership[];
   memberships_remaining?: number;
@@ -81,6 +83,11 @@ function calcAge(dob: string): number | null {
   if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
   return age >= 1 && age <= 18 ? age : null;
 }
+
+// Address step (A4) — required address type + the exact sharing-consent wording.
+const ADDRESS_TYPES = ["Home", "Work", "PO Box"];
+const ADDRESS_SHARE_CONSENT_TEXT =
+  "I understand this address will be shared with my child's pen pal's family so letters can be delivered, and I am choosing an address I am comfortable sharing.";
 
 // Guardian attestation (item D1) — must match the backend's canonical wording.
 const GUARDIAN_ATTESTATION_STATEMENTS = [
@@ -380,6 +387,25 @@ export default function Onboarding() {
   // A5 — Turnstile bot check (token sent with the first submit call).
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
 
+  // A4 — address step: editable address, required type (no default), sharing consent.
+  const [address, setAddress] = useState("");
+  const [addressType, setAddressType] = useState("");
+  const [addressShareAck, setAddressShareAck] = useState(false);
+  const addressPrefilled = useRef(false);
+  useEffect(() => {
+    // Prefill the address from checkout once, but let the parent edit it freely.
+    if (!addressPrefilled.current && parent?.mailing_address) {
+      setAddress(parent.mailing_address);
+      addressPrefilled.current = true;
+    }
+    if (!addressType && parent?.address_type && ADDRESS_TYPES.includes(parent.address_type)) {
+      // Only pre-select if checkout gave a recognised type; otherwise force a choice.
+      setAddressType(parent.address_type);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parent]);
+  const addressComplete = address.trim().length > 0 && !!addressType && addressShareAck;
+
   const updateChild = (uid: string, updates: Partial<ChildForm>) => {
     setChildren((prev) => prev.map((c) => c.uid === uid ? { ...c, ...updates } : c));
   };
@@ -405,7 +431,7 @@ export default function Onboarding() {
   const canSubmit = children.every((c) => {
     const age = calcAge(c.date_of_birth);
     return c.child_first_name.trim().length > 0 && age !== null;
-  }) && allAttested && !!turnstileToken && !submitting;
+  }) && addressComplete && allAttested && !!turnstileToken && !submitting;
 
   const handleSubmit = async () => {
     if (!canSubmit || !token) return;
@@ -418,7 +444,13 @@ export default function Onboarding() {
     try {
       await customFetch(`/api/onboarding/${token}/attestation`, {
         method: "POST",
-        body: JSON.stringify({ agreed: true, turnstile_token: turnstileToken }),
+        body: JSON.stringify({
+          agreed: true,
+          turnstile_token: turnstileToken,
+          mailing_address: address.trim(),
+          address_type: addressType,
+          address_share_ack: addressShareAck,
+        }),
       });
     } catch (err) {
       setSubmitting(false);
@@ -619,6 +651,59 @@ export default function Onboarding() {
 
         <Separator />
 
+        {/* Address step (A4) — confirm/edit address, required type, sharing consent */}
+        <div className="space-y-4 bg-white border rounded-xl p-4">
+          <div>
+            <p className="text-sm font-semibold text-gray-800">Where should letters be delivered?</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              This is the address from your subscription — please check it's correct, and fix any typo before letters go out.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="onb-address">Mailing address</Label>
+            <Input
+              id="onb-address"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              placeholder="Street, city, state, ZIP"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Address type</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {ADDRESS_TYPES.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setAddressType(t)}
+                  className={`p-2.5 rounded-lg border-2 text-sm font-medium transition-all ${
+                    addressType === t
+                      ? "border-[#DD4B39] bg-[#DD4B39]/5"
+                      : "border-gray-200 hover:border-gray-300"
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+            {!addressType && (
+              <p className="text-xs text-gray-400">Please choose one — we don't set a default on purpose.</p>
+            )}
+          </div>
+
+          <label className="flex items-start gap-2.5 cursor-pointer text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={addressShareAck}
+              onChange={() => setAddressShareAck((v) => !v)}
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-[#DD4B39] focus:ring-[#DD4B39] cursor-pointer"
+            />
+            <span>{ADDRESS_SHARE_CONSENT_TEXT}</span>
+          </label>
+        </div>
+
         {/* Guardian attestation — all four required before submitting */}
         <div className="space-y-3 bg-[#FFF9F4] border border-[#DD4B39]/15 rounded-xl p-4">
           <p className="text-sm font-semibold text-gray-800">Before you finish, please confirm:</p>
@@ -653,6 +738,8 @@ export default function Onboarding() {
           <p className="text-xs text-center text-gray-400">
             {!(children.every((c) => c.child_first_name.trim() && calcAge(c.date_of_birth) !== null))
               ? "Please fill in a name and date of birth for each child before submitting."
+              : !addressComplete
+              ? "Please confirm your address, pick an address type, and agree to sharing."
               : !allAttested
               ? "Please check all four boxes above to continue."
               : "Please complete the verification above to continue."}

@@ -28,11 +28,15 @@ const VALID_TIERS = ["Core", "Minis", "Homeschool Core", "Homeschool Minis"];
 async function loadParentByToken(token: string) {
   const { data } = await supabase
     .from("parents")
-    .select("id, membership_tier, created_at, guardian_attestation_at")
+    .select("id, membership_tier, created_at, guardian_attestation_at, address_share_ack_at")
     .eq("onboarding_token", token)
     .single();
   return data;
 }
+
+// Address types a parent may choose at onboarding. Required — no default; the
+// parent must actively pick one. (A6 will add a "Give a Key PO Box" option.)
+const ONBOARDING_ADDRESS_TYPES = ["Home", "Work", "PO Box"];
 
 /** A tier is a "Minis" tier if it serves ages 3–5. */
 function isMinisTier(tier: string): boolean {
@@ -81,7 +85,7 @@ router.get("/onboarding/:token", async (req, res) => {
   try {
     const { data: parent, error } = await supabase
       .from("parents")
-      .select("id, first_name, last_name, email, membership_tier, state, created_at")
+      .select("id, first_name, last_name, email, membership_tier, state, mailing_address, address_type, created_at")
       .eq("onboarding_token", req.params.token)
       .single();
 
@@ -121,10 +125,15 @@ router.get("/onboarding/:token", async (req, res) => {
   }
 });
 
-// POST /api/onboarding/:token/attestation — public. Records that the parent
-// checked all four guardian-attestation boxes, with the timestamp and the
-// wording version they agreed to. Called once per submit, before the children.
-// Idempotent: if already recorded, we keep the original timestamp.
+// POST /api/onboarding/:token/attestation — public. The parent-level finalize
+// step, called once per submit before the children. Records two things:
+//   1. Guardian attestation (four boxes) with timestamp + wording version.
+//   2. The confirmed/edited mailing address, a required address type, and the
+//      address-sharing consent (with its timestamp).
+// Address edits here are applied DIRECTLY (part of signup) — the onboarding link
+// itself already proves the parent controls the account email, and no match or
+// letters exist yet, so the A1 email round-trip isn't needed. A1's email
+// confirmation is for address changes made *after* signup.
 router.post("/onboarding/:token/attestation", async (req, res) => {
   try {
     // A5: bot protection — the attestation is the once-per-submit gate for the
@@ -158,16 +167,42 @@ router.post("/onboarding/:token/attestation", async (req, res) => {
       return;
     }
 
-    // Keep the first attestation if one already exists (don't overwrite the date).
-    if (!parent.guardian_attestation_at) {
-      await supabase
-        .from("parents")
-        .update({
-          guardian_attestation_at: new Date().toISOString(),
-          guardian_attestation_version: GUARDIAN_ATTESTATION_VERSION,
-        })
-        .eq("id", parent.id);
+    // Address block — required at onboarding (A4). The parent must confirm/edit
+    // the address, actively pick a type, and agree to sharing.
+    const body = req.body as {
+      mailing_address?: string;
+      address_type?: string;
+      address_share_ack?: boolean;
+    };
+    const mailingAddress = (body.mailing_address ?? "").trim();
+    if (!mailingAddress) {
+      res.status(400).json({ error: "A mailing address is required." });
+      return;
     }
+    if (!body.address_type || !ONBOARDING_ADDRESS_TYPES.includes(body.address_type)) {
+      res.status(400).json({ error: "Please choose an address type (Home, Work or PO Box)." });
+      return;
+    }
+    if (body.address_share_ack !== true) {
+      res.status(400).json({ error: "Please agree to share this address so letters can be delivered." });
+      return;
+    }
+
+    const update: Record<string, unknown> = {
+      // Address edits at onboarding apply directly (see the note above).
+      mailing_address: mailingAddress,
+      address_type: body.address_type,
+    };
+    // Timestamps are first-write-wins so we keep the original consent moment.
+    if (!parent.guardian_attestation_at) {
+      update["guardian_attestation_at"] = new Date().toISOString();
+      update["guardian_attestation_version"] = GUARDIAN_ATTESTATION_VERSION;
+    }
+    if (!parent.address_share_ack_at) {
+      update["address_share_ack_at"] = new Date().toISOString();
+    }
+
+    await supabase.from("parents").update(update).eq("id", parent.id);
 
     res.json({ success: true, version: GUARDIAN_ATTESTATION_VERSION });
   } catch (err) {
