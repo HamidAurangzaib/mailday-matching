@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { supabase } from "../lib/supabase.js";
-import { requireAuth, type AuthRequest } from "../middlewares/auth.js";
+import { requireAuth, requireAdmin, type AuthRequest } from "../middlewares/auth.js";
 import { differenceInDays, parseISO } from "date-fns";
 import { createConfirmationToken } from "../lib/confirmation.js";
 import { sendEmail } from "../lib/email.js";
@@ -383,6 +383,98 @@ router.post("/matches/:id/consent-decline", requireAuth, async (req: AuthRequest
     res.json(result);
   } catch (err) {
     req.log?.error({ err }, "Error declining address consent");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /admin/consent-status
+//
+// Group A / A4: the admin consent board. One row per Pending match showing where
+// it sits in the two-party address-consent flow — who has said yes, who we're
+// still waiting on, which reminders have gone out, and the next step due. This is
+// the human counterpart to the automated reminder/timeout cron.
+router.get("/admin/consent-status", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    const { data: matches, error } = await supabase
+      .from("matches")
+      .select(
+        "id, child_a_id, child_b_id, created_at, " +
+        "address_confirmed_a, address_confirmed_b, address_confirmed_a_at, address_confirmed_b_at, " +
+        "consent_reminder_1_sent_at, consent_reminder_2_sent_at, consent_timeout_at",
+      )
+      .eq("match_status", "Pending")
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      req.log?.error({ error }, "Error loading consent status");
+      res.status(500).json({ error: "Failed to load consent status" });
+      return;
+    }
+
+    type ConsentStatusMatch = {
+      id: string;
+      child_a_id: string;
+      child_b_id: string;
+      created_at: string;
+      address_confirmed_a: boolean | null;
+      address_confirmed_b: boolean | null;
+      address_confirmed_a_at: string | null;
+      address_confirmed_b_at: string | null;
+      consent_reminder_1_sent_at: string | null;
+      consent_reminder_2_sent_at: string | null;
+      consent_timeout_at: string | null;
+    };
+    const rows = (matches ?? []) as unknown as ConsentStatusMatch[];
+    const childIds = [...new Set(rows.flatMap((m) => [m.child_a_id, m.child_b_id]).filter(Boolean))] as string[];
+    const childMap = new Map<string, Record<string, unknown>>();
+    if (childIds.length > 0) {
+      const { data: children } = await supabase
+        .from("children")
+        .select("id, child_first_name, parents(first_name, last_name, email)")
+        .in("id", childIds);
+      for (const c of children ?? []) childMap.set(c.id as string, c as Record<string, unknown>);
+    }
+
+    const now = new Date();
+    const personOf = (childId: string, confirmed: boolean, confirmedAt: string | null) => {
+      const c = childMap.get(childId);
+      const p = (c?.["parents"] as { first_name?: string; last_name?: string; email?: string } | null) ?? null;
+      return {
+        child_first_name: (c?.["child_first_name"] as string) ?? null,
+        parent_name: p ? `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim() || null : null,
+        email: p?.email ?? null,
+        consented: confirmed,
+        consented_at: confirmedAt,
+      };
+    };
+
+    const items = rows.map((m) => {
+      const elapsedDays = differenceInDays(now, parseISO(m.created_at as string));
+      const aOk = !!m.address_confirmed_a;
+      const bOk = !!m.address_confirmed_b;
+      let nextStep: string;
+      if (aOk && bOk) nextStep = "Both consented — promoting to Active";
+      else if (elapsedDays >= 14) nextStep = "Overdue — winds down on the next consent run";
+      else if (elapsedDays >= 7 && !m.consent_reminder_2_sent_at) nextStep = "Day-7 reminder due";
+      else if (elapsedDays >= 2 && !m.consent_reminder_1_sent_at) nextStep = "48-hour reminder due";
+      else nextStep = `Waiting — day ${elapsedDays} of 14`;
+
+      return {
+        match_id: m.id,
+        created_at: m.created_at,
+        days_elapsed: elapsedDays,
+        side_a: personOf(m.child_a_id as string, aOk, (m.address_confirmed_a_at as string) ?? null),
+        side_b: personOf(m.child_b_id as string, bOk, (m.address_confirmed_b_at as string) ?? null),
+        reminder_1_sent_at: m.consent_reminder_1_sent_at ?? null,
+        reminder_2_sent_at: m.consent_reminder_2_sent_at ?? null,
+        both_consented: aOk && bOk,
+        next_step: nextStep,
+      };
+    });
+
+    res.json(items);
+  } catch (err) {
+    req.log?.error({ err }, "Error loading consent status");
     res.status(500).json({ error: "Internal server error" });
   }
 });
