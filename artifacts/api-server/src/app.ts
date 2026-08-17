@@ -59,6 +59,23 @@ const passwordOpsLimiter = rateLimit({
   message: { error: "Too many password operations, please try again later." },
 });
 
+// A5 (defence-in-depth): per-IP ceiling on the unauthenticated public forms.
+// Turnstile is the real bot gate; this is the backstop for when a token is
+// farmed or Cloudflare is unreachable (verifyTurnstile deliberately allows on a
+// network error rather than locking real families out).
+//
+// The budget is generous on purpose: onboarding is several calls for a family
+// with multiple children (form load + attestation + one per child), and shared
+// NAT means several genuine families can share an IP. It still turns bulk
+// submission from cheap into impractical.
+const publicFormLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many submissions from this connection. Please try again in a little while." },
+});
+
 app.use(
   pinoHttp({
     logger,
@@ -89,6 +106,15 @@ app.use("/api/auth/login", loginLimiter);
 app.use("/api/auth/forgot-password", passwordOpsLimiter);
 app.use("/api/auth/reset-password", passwordOpsLimiter);
 app.use("/api/auth/me/password", passwordOpsLimiter);
+
+// A5: every unauthenticated public form. Mounted per-path rather than on
+// /api/give-a-key so the authenticated admin routes under it stay unlimited.
+app.use("/api/enroll", publicFormLimiter);
+app.use("/api/onboarding", publicFormLimiter);
+app.use("/api/give-a-key/apply", publicFormLimiter);
+app.use("/api/give-a-key/po-box", publicFormLimiter);
+app.use("/api/address-change/request", publicFormLimiter);
+
 app.use("/api", router);
 
 // Serve the built admin dashboard (SPA) from this same server, so ONE address
