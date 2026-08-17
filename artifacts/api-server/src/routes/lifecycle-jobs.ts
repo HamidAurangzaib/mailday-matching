@@ -34,6 +34,7 @@ import {
 import { emitKlaviyoEvent } from "../lib/klaviyo-events.js";
 import { computeSubscriptionMonth } from "../lib/subscription.js";
 import { appBaseUrl } from "../lib/app-url.js";
+import { AWAITING_ADDRESS } from "../lib/gak-address.js";
 
 const router: IRouter = Router();
 
@@ -52,6 +53,9 @@ const GUARANTEE_BREACH_DAYS = 21;
 const ADDRESS_CONFIRM_CHASE_DAYS = 7;
 /** A Poppy card task open this many days = family treated as offboarded. */
 const WINBACK_FAIL_AFTER_DAYS = 60;
+/** A6: a Give-a-Key family with still no address after this many days gets a
+ *  follow-up task. A nudge only — never a cancellation. */
+const GAK_ADDRESS_OVERDUE_DAYS = 30;
 
 // ─── Block B: Incomplete-onboarding nudge ────────────────────────────────────
 
@@ -1302,6 +1306,100 @@ export async function runPackDueCron(
   return result;
 }
 
+// ─── Group A / A6: Give-a-Key families still waiting on a PO Box ─────────────
+
+export interface GakAddressOverdueResult {
+  scanned: number;
+  tasksCreated: number;
+  errors: string[];
+  ranAt: string;
+}
+
+/**
+ * A child held at 'Awaiting Address' for GAK_ADDRESS_OVERDUE_DAYS gets a
+ * follow-up task so someone checks in on the PO Box setup.
+ *
+ * A6 is explicit that this is a nudge and never a cancellation: the family is
+ * waiting on a post office, which they can't hurry, and dropping them for it
+ * would punish exactly the families Give a Key exists to help.
+ *
+ * Idempotency: skipped if an open 'gak_address_overdue' task already exists for
+ * that child, so a family isn't re-flagged every night.
+ */
+export async function runGakAddressOverdue(): Promise<GakAddressOverdueResult> {
+  const result: GakAddressOverdueResult = {
+    scanned: 0,
+    tasksCreated: 0,
+    errors: [],
+    ranAt: new Date().toISOString(),
+  };
+
+  const cutoff = new Date(Date.now() - GAK_ADDRESS_OVERDUE_DAYS * 86400000).toISOString();
+  const { data: waiting, error } = await supabase
+    .from("children")
+    .select("id, child_first_name, parent_id, awaiting_address_since, parents(first_name, last_name, email)")
+    .eq("match_status", AWAITING_ADDRESS)
+    .lte("awaiting_address_since", cutoff);
+
+  if (error) {
+    result.errors.push(`Failed to load awaiting-address children: ${error.message}`);
+    return result;
+  }
+  if (!waiting || waiting.length === 0) {
+    logger.info(result, "A6 overdue cron: nobody waiting past the threshold");
+    return result;
+  }
+  result.scanned = waiting.length;
+
+  // Idempotency: skip children that already have an open follow-up.
+  const childIds = waiting.map((c) => c.id);
+  const { data: existing } = await supabase
+    .from("lifecycle_tasks")
+    .select("child_id")
+    .eq("type", "gak_address_overdue")
+    .eq("completed", false)
+    .in("child_id", childIds);
+  const already = new Set((existing ?? []).map((t) => t.child_id));
+
+  for (const child of waiting) {
+    if (already.has(child.id)) continue;
+
+    const p = (child as Record<string, unknown>)["parents"] as
+      | { first_name?: string; last_name?: string; email?: string }
+      | null;
+    const family = p ? `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim() : "?";
+    const days = child.awaiting_address_since
+      ? differenceInDays(new Date(), parseISO(child.awaiting_address_since as string))
+      : GAK_ADDRESS_OVERDUE_DAYS;
+
+    const { error: taskErr } = await supabase.from("lifecycle_tasks").insert({
+      type: "gak_address_overdue",
+      title: `Give a Key PO Box still not set up — ${family}`,
+      description:
+        `${child.child_first_name} has been waiting ${days} days for a Give a Key PO Box ` +
+        `and is not in the matching pool yet. Check in with the family (${p?.email ?? "no email on file"}) ` +
+        `to see how the PO Box setup is going. Do not cancel — this is a nudge only.`,
+      child_id: child.id,
+      parent_id: child.parent_id,
+    });
+
+    if (taskErr) {
+      result.errors.push(`task create failed for child ${child.id}: ${taskErr.message}`);
+    } else {
+      result.tasksCreated++;
+      await logAudit({
+        action: "lifecycle_task.created",
+        entityType: "child",
+        entityId: child.id as string,
+        metadata: { type: "gak_address_overdue", daysWaiting: days },
+      });
+    }
+  }
+
+  logger.info(result, "A6 overdue cron completed");
+  return result;
+}
+
 let nudgeJob: ReturnType<typeof cron.schedule> | null = null;
 let breachJob: ReturnType<typeof cron.schedule> | null = null;
 let chaseAddressJob: ReturnType<typeof cron.schedule> | null = null;
@@ -1310,6 +1408,7 @@ let agingJob: ReturnType<typeof cron.schedule> | null = null;
 let finaliseCancellationsJob: ReturnType<typeof cron.schedule> | null = null;
 let addressConsentJob: ReturnType<typeof cron.schedule> | null = null;
 let packDueJob: ReturnType<typeof cron.schedule> | null = null;
+let gakAddressJob: ReturnType<typeof cron.schedule> | null = null;
 
 /** Start both daily lifecycle crons at 9 AM Mountain. */
 export function startLifecycleCrons(): void {
@@ -1389,8 +1488,19 @@ export function startLifecycleCrons(): void {
     },
     { timezone: "America/Denver" },
   );
+  // A6: Give-a-Key families still without a PO Box. Daily is plenty — this is a
+  // 30-day threshold, so a few hours either way is immaterial.
+  gakAddressJob = cron.schedule(
+    "40 9 * * *",
+    () => {
+      void runGakAddressOverdue().catch((err) =>
+        logger.error({ err }, "GAK address-overdue cron failed"),
+      );
+    },
+    { timezone: "America/Denver" },
+  );
   logger.info(
-    "Lifecycle crons scheduled (9:00, 9:05, 9:10, 9:15, 9:20 daily + finalise every 4h + address-consent every 4h + pack_due 00:30 on the 1st — America/Denver)",
+    "Lifecycle crons scheduled (9:00, 9:05, 9:10, 9:15, 9:20, 9:40 daily + finalise every 4h + address-consent every 4h + pack_due 00:30 on the 1st — America/Denver)",
   );
 }
 
@@ -1403,6 +1513,7 @@ export function stopLifecycleCrons(): void {
   finaliseCancellationsJob?.stop();
   addressConsentJob?.stop();
   packDueJob?.stop();
+  gakAddressJob?.stop();
   nudgeJob = null;
   breachJob = null;
   chaseAddressJob = null;
@@ -1411,6 +1522,7 @@ export function stopLifecycleCrons(): void {
   finaliseCancellationsJob = null;
   addressConsentJob = null;
   packDueJob = null;
+  gakAddressJob = null;
 }
 
 // App-URL helper now lives in lib/app-url.ts (imported at the top of this file),

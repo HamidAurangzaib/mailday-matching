@@ -17,6 +17,7 @@ import { logAudit } from "../lib/audit.js";
 import { emitKlaviyoEvent } from "../lib/klaviyo-events.js";
 import { removePauseReason } from "../lib/pause.js";
 import { reopenMatchForReconsent } from "../lib/match-consent.js";
+import { activateAwaitingAddressChildren } from "../lib/gak-address.js";
 
 const router: IRouter = Router();
 
@@ -112,11 +113,24 @@ router.get("/confirm/:token", async (req, res) => {
             req,
           });
 
-          req.log?.info({ applicationId }, "GAK PO-box address confirmed via email link");
+          // A6: the address was the missing half for a family who onboarded
+          // with "Give a Key PO Box". If the receipt is already verified, this
+          // completes the pair and their children join the matching pool now.
+          const released = await activateAwaitingAddressChildren(applicationId, {
+            actorEmail: consumed.email,
+            source: "address_confirmation",
+          });
+
+          req.log?.info(
+            { applicationId, released: released.activated },
+            "GAK PO-box address confirmed via email link",
+          );
           res.send(
             SUCCESS(
               "PO Box address confirmed",
-              "Thanks — your PO Box address has been saved to your Give a Key application. Our team will verify your receipt and activate your membership shortly.",
+              released.activated > 0
+                ? "Thanks — your PO Box address is saved and your child is now in the queue to be matched with a pen pal. We'll be in touch as soon as we've found them one."
+                : "Thanks — your PO Box address has been saved to your Give a Key application. Our team will verify your receipt and activate your membership shortly.",
             ),
           );
           return;

@@ -5,6 +5,7 @@ import { createConfirmationToken } from "../lib/confirmation.js";
 import { sendEmail } from "../lib/email.js";
 import { emitKlaviyoEvent } from "../lib/klaviyo-events.js";
 import { verifyTurnstile, tokenFromBody } from "../lib/turnstile.js";
+import { activateAwaitingAddressChildren } from "../lib/gak-address.js";
 
 const router: IRouter = Router();
 
@@ -539,19 +540,40 @@ router.patch("/give-a-key/applications/:id/verify-receipt", requireAuth, require
       parentId = newParent.id as string;
     }
 
-    // Create child record
-    await supabase.from("children").insert({
-      parent_id: parentId,
-      child_first_name: application.child_first_name,
-      date_of_birth: null,
-      tier: "Core",
-      interests: application.child_interests || [],
-      match_status: "Unmatched",
-      onboarding_complete: true,
-      billing_paused: false,
-    });
+    // Create the child record — unless this family already onboarded.
+    //
+    // A6 lets a family finish onboarding before their PO Box exists, which
+    // creates the child there and holds it at 'Awaiting Address'. Inserting
+    // again here would give the family a duplicate child, and the duplicate
+    // would be the one in the matching pool.
+    const { data: existingChild } = await supabase
+      .from("children")
+      .select("id")
+      .eq("parent_id", parentId)
+      .eq("child_first_name", application.child_first_name)
+      .maybeSingle();
 
-    // Activate application
+    if (existingChild) {
+      req.log?.info(
+        { parentId, childId: existingChild.id },
+        "Give a Key: child already exists from onboarding — not duplicating",
+      );
+    } else {
+      await supabase.from("children").insert({
+        parent_id: parentId,
+        child_first_name: application.child_first_name,
+        date_of_birth: null,
+        tier: "Core",
+        interests: application.child_interests || [],
+        match_status: "Unmatched",
+        onboarding_complete: true,
+        billing_paused: false,
+      });
+    }
+
+    // Activate application. This must be written BEFORE the A6 activation call
+    // below, which re-reads receipt_verified to decide whether both halves of
+    // the pair are present.
     await supabase
       .from("give_a_key_applications")
       .update({
@@ -561,15 +583,28 @@ router.patch("/give-a-key/applications/:id/verify-receipt", requireAuth, require
       })
       .eq("id", req.params["id"]);
 
+    // A6: the receipt was the missing half. If the PO Box address has already
+    // been confirmed by the parent, their waiting children join the pool now.
+    const released = await activateAwaitingAddressChildren(String(req.params["id"]), {
+      actorEmail: req.user?.email ?? "admin",
+      source: "receipt_verification",
+    });
+
     const pName = `${(application as Record<string,unknown>).parent_first_name} ${(application as Record<string,unknown>).parent_last_name}`;
     const pEmail = (application as Record<string,unknown>).parent_email as string;
+    const stillWaitingOnAddress = released.reason === "not_ready";
     await createTask(String(req.params["id"]), "notify_activated",
       `Email ${pName} — welcome to MailDay!`,
-      "Their membership is now active and their child is in the matching queue.",
+      stillWaitingOnAddress
+        ? "Their membership is now active. Their child is NOT in the matching queue yet — we're still waiting on the PO Box address confirmation email to be clicked."
+        : "Their membership is now active and their child is in the matching queue.",
       pName, pEmail);
 
-    req.log?.info({ applicationId: req.params["id"], parentId }, "Give a Key: receipt verified, family activated");
-    res.json({ success: true, parent_id: parentId });
+    req.log?.info(
+      { applicationId: req.params["id"], parentId, released: released.activated },
+      "Give a Key: receipt verified, family activated",
+    );
+    res.json({ success: true, parent_id: parentId, children_released: released.activated });
   } catch (err) {
     req.log?.error({ err }, "Give a Key: verify receipt error");
     res.status(500).json({ error: "Internal server error" });

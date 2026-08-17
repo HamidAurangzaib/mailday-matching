@@ -63,6 +63,9 @@ const MATCH_STATUS_STYLES: Record<string, { badge: string; variant: "default" | 
   "Rematch Requested": { badge: "bg-orange-100 text-orange-800 border-orange-200", variant: "outline" },
   Paused:              { badge: "bg-yellow-100 text-yellow-800 border-yellow-200", variant: "outline" },
   Cancelled:           { badge: "bg-red-100 text-red-800 border-red-200", variant: "outline" },
+  // A6: onboarded, but held out of the matching pool until their Give-a-Key
+  // PO Box exists. Blue rather than yellow — nothing is wrong, they're waiting.
+  "Awaiting Address":  { badge: "bg-blue-100 text-blue-800 border-blue-200", variant: "outline" },
 };
 
 export default function Children() {
@@ -136,6 +139,7 @@ export default function Children() {
             <SelectItem value="Unmatched">Unmatched</SelectItem>
             <SelectItem value="Matched">Matched</SelectItem>
             <SelectItem value="Rematch Requested">Rematch Requested</SelectItem>
+            <SelectItem value="Awaiting Address">Awaiting Address</SelectItem>
             <SelectItem value="Paused">Paused</SelectItem>
             <SelectItem value="Cancelled">Cancelled</SelectItem>
             <SelectItem value="give_a_key">Give a Key</SelectItem>

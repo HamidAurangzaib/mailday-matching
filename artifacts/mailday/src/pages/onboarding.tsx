@@ -86,6 +86,9 @@ function calcAge(dob: string): number | null {
 
 // Address step (A4) — required address type + the exact sharing-consent wording.
 const ADDRESS_TYPES = ["Home", "Work", "PO Box"];
+// A6 — the one option that may be submitted with no address, because the family
+// is still waiting for the PO Box to exist. Must match the backend constant.
+const GAK_ADDRESS_TYPE = "Give a Key PO Box";
 const ADDRESS_SHARE_CONSENT_TEXT =
   "I understand this address will be shared with my child's pen pal's family so letters can be delivered, and I am choosing an address I am comfortable sharing.";
 
@@ -404,7 +407,12 @@ export default function Onboarding() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parent]);
-  const addressComplete = address.trim().length > 0 && !!addressType && addressShareAck;
+  // A6: a Give-a-Key family has no address to give yet, so the address itself
+  // is optional for them. The type and the sharing agreement are still required
+  // — they're agreeing to share whichever address ends up on the account.
+  const awaitingGakAddress = addressType === GAK_ADDRESS_TYPE;
+  const addressComplete =
+    (address.trim().length > 0 || awaitingGakAddress) && !!addressType && addressShareAck;
 
   const updateChild = (uid: string, updates: Partial<ChildForm>) => {
     setChildren((prev) => prev.map((c) => c.uid === uid ? { ...c, ...updates } : c));
@@ -660,15 +668,29 @@ export default function Onboarding() {
             </p>
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="onb-address">Mailing address</Label>
-            <Input
-              id="onb-address"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="Street, city, state, ZIP"
-            />
-          </div>
+          {/* A6: a family waiting on a Give-a-Key PO Box has no address to
+              type, so we explain what happens next instead of showing them a
+              field they can't fill. */}
+          {awaitingGakAddress ? (
+            <div className="rounded-lg bg-[#FFF9F4] border border-[#DD4B39]/15 p-3 space-y-1">
+              <p className="text-sm font-medium text-gray-800">We'll add your PO Box once it's set up</p>
+              <p className="text-xs text-gray-600">
+                No address needed right now. When your Give a Key PO Box is ready, send us the receipt and
+                we'll email you a link to confirm the address. Your child joins the pen pal queue the moment
+                that's done — nothing is posted anywhere before then.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label htmlFor="onb-address">Mailing address</Label>
+              <Input
+                id="onb-address"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="Street, city, state, ZIP"
+              />
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <Label>Address type</Label>
@@ -688,6 +710,19 @@ export default function Onboarding() {
                 </button>
               ))}
             </div>
+            {/* Full width on its own row: the label is long, and it's a
+                different kind of answer from the other three. */}
+            <button
+              type="button"
+              onClick={() => setAddressType(GAK_ADDRESS_TYPE)}
+              className={`w-full p-2.5 rounded-lg border-2 text-sm font-medium transition-all text-left ${
+                addressType === GAK_ADDRESS_TYPE
+                  ? "border-[#DD4B39] bg-[#DD4B39]/5"
+                  : "border-gray-200 hover:border-gray-300"
+              }`}
+            >
+              I'm setting up a PO Box through Give a Key
+            </button>
             {!addressType && (
               <p className="text-xs text-gray-400">Please choose one — we don't set a default on purpose.</p>
             )}
@@ -739,7 +774,9 @@ export default function Onboarding() {
             {!(children.every((c) => c.child_first_name.trim() && calcAge(c.date_of_birth) !== null))
               ? "Please fill in a name and date of birth for each child before submitting."
               : !addressComplete
-              ? "Please confirm your address, pick an address type, and agree to sharing."
+              ? awaitingGakAddress
+                ? "Please agree to sharing to continue."
+                : "Please confirm your address, pick an address type, and agree to sharing."
               : !allAttested
               ? "Please check all four boxes above to continue."
               : "Please complete the verification above to continue."}

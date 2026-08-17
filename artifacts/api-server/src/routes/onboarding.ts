@@ -3,6 +3,7 @@ import { supabase } from "../lib/supabase.js";
 import { differenceInDays, parseISO } from "date-fns";
 import { computeAge, computeTier } from "../lib/age.js";
 import { verifyTurnstile, tokenFromBody } from "../lib/turnstile.js";
+import { GAK_ADDRESS_TYPE, AWAITING_ADDRESS } from "../lib/gak-address.js";
 
 const router: IRouter = Router();
 
@@ -35,8 +36,10 @@ async function loadParentByToken(token: string) {
 }
 
 // Address types a parent may choose at onboarding. Required — no default; the
-// parent must actively pick one. (A6 will add a "Give a Key PO Box" option.)
-const ONBOARDING_ADDRESS_TYPES = ["Home", "Work", "PO Box"];
+// parent must actively pick one. A6 adds the Give-a-Key option, which is the
+// only one that may be submitted without an address: those families are still
+// waiting for a PO Box to exist.
+const ONBOARDING_ADDRESS_TYPES = ["Home", "Work", "PO Box", GAK_ADDRESS_TYPE];
 
 /** A tier is a "Minis" tier if it serves ages 3–5. */
 function isMinisTier(tier: string): boolean {
@@ -175,24 +178,32 @@ router.post("/onboarding/:token/attestation", async (req, res) => {
       address_share_ack?: boolean;
     };
     const mailingAddress = (body.mailing_address ?? "").trim();
-    if (!mailingAddress) {
-      res.status(400).json({ error: "A mailing address is required." });
-      return;
-    }
     if (!body.address_type || !ONBOARDING_ADDRESS_TYPES.includes(body.address_type)) {
       res.status(400).json({ error: "Please choose an address type (Home, Work or PO Box)." });
       return;
     }
+    // A6: a family setting up a PO Box through Give a Key has nowhere for
+    // letters to go yet, so they're the one case allowed through without an
+    // address. Their children are held out of the matching pool instead.
+    const awaitingGakAddress = body.address_type === GAK_ADDRESS_TYPE;
+    if (!mailingAddress && !awaitingGakAddress) {
+      res.status(400).json({ error: "A mailing address is required." });
+      return;
+    }
+    // The sharing agreement is still required — they're consenting to share
+    // whichever address ends up on the account, not a specific one.
     if (body.address_share_ack !== true) {
       res.status(400).json({ error: "Please agree to share this address so letters can be delivered." });
       return;
     }
 
     const update: Record<string, unknown> = {
-      // Address edits at onboarding apply directly (see the note above).
-      mailing_address: mailingAddress,
       address_type: body.address_type,
     };
+    // Address edits at onboarding apply directly (see the note above). Don't
+    // blank an address already on file just because a Give-a-Key family left
+    // the field empty.
+    if (mailingAddress) update["mailing_address"] = mailingAddress;
     // Timestamps are first-write-wins so we keep the original consent moment.
     if (!parent.guardian_attestation_at) {
       update["guardian_attestation_at"] = new Date().toISOString();
@@ -222,7 +233,7 @@ router.post("/onboarding/:token/child", async (req, res) => {
   try {
     const { data: parent, error: parentErr } = await supabase
       .from("parents")
-      .select("id, membership_tier, created_at")
+      .select("id, membership_tier, created_at, mailing_address, address_type")
       .eq("onboarding_token", req.params.token)
       .single();
 
@@ -318,25 +329,40 @@ router.post("/onboarding/:token/child", async (req, res) => {
 
     const today = new Date().toISOString().split("T")[0];
 
+    // A6: a Give-a-Key family with no address yet is held out of the matching
+    // pool. The matcher only selects 'Unmatched' / 'Rematch Requested', so this
+    // status is the exclusion — there's no separate rule to keep in sync.
+    //
+    // Their guarantee clock also stays unstarted: it would otherwise run down
+    // while they wait for a PO Box they can't hurry, and put them in breach
+    // before they were ever matchable. gak-address.ts starts it on release.
+    const awaitingAddress =
+      parent.address_type === GAK_ADDRESS_TYPE && !(parent.mailing_address as string | null)?.trim();
+
+    const childInsert: Record<string, unknown> = {
+      parent_id: parent.id,
+      child_first_name: body.child_first_name.trim(),
+      age: childAge,                  // legacy column, kept in sync with DOB on insert
+      date_of_birth: body.date_of_birth,
+      tier,
+      interests,
+      homeschool_edition: body.homeschool_edition ?? false,
+      homeschool_tier: body.homeschool_tier,
+      homeschool_approach: body.homeschool_approach,
+      match_status: awaitingAddress ? AWAITING_ADDRESS : "Unmatched",
+      rematch_count: 0,
+      match_guarantee_start_date: awaitingAddress ? null : today,
+      billing_paused: false,
+      safety_flag: false,
+      created_date: today,
+    };
+    // Only reference the A6 column on the A6 path, so ordinary onboarding still
+    // works if this code reaches production ahead of its migration.
+    if (awaitingAddress) childInsert["awaiting_address_since"] = new Date().toISOString();
+
     const { data: child, error } = await supabase
       .from("children")
-      .insert({
-        parent_id: parent.id,
-        child_first_name: body.child_first_name.trim(),
-        age: childAge,                  // legacy column, kept in sync with DOB on insert
-        date_of_birth: body.date_of_birth,
-        tier,
-        interests,
-        homeschool_edition: body.homeschool_edition ?? false,
-        homeschool_tier: body.homeschool_tier,
-        homeschool_approach: body.homeschool_approach,
-        match_status: "Unmatched",
-        rematch_count: 0,
-        match_guarantee_start_date: today,
-        billing_paused: false,
-        safety_flag: false,
-        created_date: today,
-      })
+      .insert(childInsert)
       .select("id, child_first_name, tier")
       .single();
 
