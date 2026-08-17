@@ -9,6 +9,7 @@ import { computeAge } from "../lib/age.js";
 import { requeueChild } from "../lib/lifecycle.js";
 import { computeSubscriptionMonth, computePriorityTier } from "../lib/subscription.js";
 import { declineAddressConsent } from "./lifecycle-jobs.js";
+import { matchingEnabled, MATCHING_DISABLED_MESSAGE } from "../lib/matching-flag.js";
 
 const router: IRouter = Router();
 
@@ -148,6 +149,14 @@ router.get("/matches", requireAuth, async (req: AuthRequest, res) => {
 // child (Block D Q1 answer — decided 2026-06-03).
 router.post("/matches", requireAuth, async (req: AuthRequest, res) => {
   try {
+    // Group A kill-switch. Checked before anything else: creating a match is
+    // what makes two families' addresses releasable to each other.
+    if (!matchingEnabled()) {
+      req.log?.warn({ userId: req.user?.id }, "Match creation blocked — MATCHING_ENABLED is off");
+      res.status(503).json({ error: MATCHING_DISABLED_MESSAGE });
+      return;
+    }
+
     const { child_a_id, child_b_id, shared_interests } = req.body;
     if (!child_a_id || !child_b_id) {
       res.status(400).json({ error: "child_a_id and child_b_id are required" });
