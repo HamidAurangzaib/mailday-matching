@@ -1,8 +1,11 @@
-modules = ["nodejs-24", "postgresql-16", "python-3.11"]
+modules = ["nodejs-24", "python-3.11", "postgresql-16"]
 
 [deployment]
 router = "application"
-deploymentTarget = "autoscale"
+# MUST stay "gce" (Reserved VM). The API server schedules ~10 in-process
+# node-cron jobs (consent timeouts, pack_due, COPPA, Klaviyo sync); autoscale
+# scales to zero when idle and those schedulers silently stop firing.
+deploymentTarget = "gce"
 
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
@@ -35,10 +38,22 @@ externalPort = 3001
 localPort = 21780
 externalPort = 3000
 
+[[ports]]
+localPort = 26118
+externalPort = 3002
+
+[[ports]]
+localPort = 26119
+externalPort = 5173
+
 [userenv]
 
 [userenv.shared]
 SUPABASE_URL = "https://wqepgxxsipztfzkldiix.supabase.co"
+# Base URL for every emailed link (onboarding, address confirmation, password
+# reset). Must include the scheme — a bare host emails unclickable relative
+# links, which is what broke on 2026-07-20. See lib/app-url.ts.
+APP_URL = "https://app.joinmailday.com"
 
 [nix]
 channel = "stable-25_05"
