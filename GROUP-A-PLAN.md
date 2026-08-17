@@ -1,8 +1,27 @@
 # Group A — Implementation Plan
 
 **Source:** Courtney's "Development Work List" (Aug 2026), Group A — *"needed before matching can go live."*
-**Status:** Order placed. In progress.
+**Status:** All six items **built**. None yet **tested against production**.
 **Goal:** Nothing in this group is optional — until all six are built **and tested**, matching stays off and no address moves between families.
+
+## Build status (2026-08-17)
+
+| Item | Built | Notes |
+|---|---|---|
+| A2 — names out of the AI | ✅ | |
+| A5 — bot protection | ✅ | Turnstile + per-IP rate limits on all five public endpoints |
+| A1 — address-change verify | ✅ | |
+| A3 + A4 — two-party consent | ✅ | |
+| A6 — Give-a-Key awaiting-address | ✅ | Holding status `Awaiting Address`; released on receipt **and** address |
+| `MATCHING_ENABLED` kill-switch | ✅ | **Default off.** Set the env var to `true` to allow match creation |
+
+**Migrations to apply, in order:** `supabase-migration-groupA-ALL.sql`, then
+`supabase-migration-groupA-a6.sql`.
+
+**Still outstanding:** the test pass below for each item, and the written
+"deployed + tested" confirmation for Courtney's attorney covering A1 and the
+A3/A4 consent flow. Neither can be done until this is live on production and
+walked through end to end.
 
 ---
 
