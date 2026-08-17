@@ -109,7 +109,6 @@ app.use("/api/auth/me/password", passwordOpsLimiter);
 
 // A5: every unauthenticated public form. Mounted per-path rather than on
 // /api/give-a-key so the authenticated admin routes under it stay unlimited.
-app.use("/api/enroll", publicFormLimiter);
 app.use("/api/onboarding", publicFormLimiter);
 app.use("/api/give-a-key/apply", publicFormLimiter);
 app.use("/api/give-a-key/po-box", publicFormLimiter);

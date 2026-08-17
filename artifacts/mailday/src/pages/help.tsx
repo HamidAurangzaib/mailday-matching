@@ -147,7 +147,7 @@ const sections: Section[] = [
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
           <div className="border border-border rounded-lg p-3">
             <div className="font-semibold text-sm mb-1 flex items-center gap-1.5"><Star className="w-3.5 h-3.5 text-amber-500" /> Paid Subscribers</div>
-            <p className="text-xs text-muted-foreground">Families sign up via the public <strong>Enroll</strong> page, pay through ReCharge, and enter the matching queue. Data syncs automatically every hour.</p>
+            <p className="text-xs text-muted-foreground">Families purchase through Shopify/ReCharge, which creates their account and emails them a personal <strong>onboarding link</strong>. They complete that form to add their children and enter the matching queue. Data syncs automatically every hour.</p>
           </div>
           <div className="border border-border rounded-lg p-3">
             <div className="font-semibold text-sm mb-1 flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-primary" /> Give A Key</div>
@@ -291,7 +291,7 @@ const sections: Section[] = [
     title: "Incomplete Onboarding  ·  /incomplete  (Admin only)",
     content: (
       <div className="space-y-3">
-        <P>Catches parents who signed up (and are paying) but never completed the enrollment form to add their child's profile. No profile = no match.</P>
+        <P>Catches parents who signed up (and are paying) but never completed their onboarding form to add their child's profile. No profile = no match.</P>
         <ul className="space-y-2 ml-1">
           <Li>Each row shows how many days the parent has been stuck. Over 7 days triggers a warning on the Dashboard.</Li>
           <Li>Click the email icon to send a reminder directly from this page.</Li>
@@ -614,8 +614,12 @@ const sections: Section[] = [
         <P>These pages are for families, not admins. Share the links directly or embed them on your website.</P>
         <div className="space-y-3">
           <div className="border border-border rounded-lg p-3">
-            <div className="font-semibold text-sm flex items-center gap-2 mb-1"><Globe className="w-3.5 h-3.5 text-sky-500" /> Enrollment  ·  /enroll</div>
-            <p className="text-xs text-muted-foreground">Standard paid subscription signup. Multi-step form collecting parent email, mailing address, and child profiles. ReCharge handles billing separately.</p>
+            <div className="font-semibold text-sm flex items-center gap-2 mb-1"><Globe className="w-3.5 h-3.5 text-sky-500" /> Onboarding  ·  /onboarding?token=…</div>
+            <p className="text-xs text-muted-foreground">The signup form for paid subscribers. Personal to each family — the link is emailed automatically when their subscription starts, so it can't be shared or embedded. Collects child profiles, the mailing address + type, the address-sharing agreement, and the four guardian confirmations. Copy a family's link from their profile in Parents.</p>
+          </div>
+          <div className="border border-border rounded-lg p-3 opacity-70">
+            <div className="font-semibold text-sm flex items-center gap-2 mb-1"><Globe className="w-3.5 h-3.5 text-muted-foreground" /> Enrollment  ·  /enroll  <span className="text-[10px] uppercase tracking-wider bg-muted px-1.5 py-0.5 rounded">Retired</span></div>
+            <p className="text-xs text-muted-foreground">Retired August 2026. It didn't collect the guardian confirmations or the address-sharing agreement, and didn't count children against purchased memberships. The link now shows a note telling families to use their emailed onboarding link instead.</p>
           </div>
           <div className="border border-border rounded-lg p-3">
             <div className="font-semibold text-sm flex items-center gap-2 mb-1"><Globe className="w-3.5 h-3.5 text-sky-500" /> Give A Key Apply  ·  /give-a-key/apply</div>
@@ -626,7 +630,7 @@ const sections: Section[] = [
             <p className="text-xs text-muted-foreground">Receipt submission portal for approved Give A Key families. They upload their USPS PO Box receipt and enter their new address. Submissions appear in the Receipts page.</p>
           </div>
         </div>
-        <Tip type="info">The enrollment and Give A Key apply pages are completely separate flows — families should only use one, not both.</Tip>
+        <Tip type="info">Onboarding and Give A Key apply are completely separate flows — families should only use one, not both.</Tip>
       </div>
     ),
   },

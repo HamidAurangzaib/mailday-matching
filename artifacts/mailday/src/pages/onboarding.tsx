@@ -573,6 +573,23 @@ export default function Onboarding() {
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
             <strong>What happens next?</strong> Our matching team will hand-pick a pen pal based on age, interests, and location. Matches typically take 5–10 business days.
           </div>
+
+          {/* The 21-day guarantee, in the parent's own words. The 21 days are
+              counted from match_guarantee_start_date and enforced by the
+              guarantee-breach job; the pause is cleared automatically when the
+              match is created. */}
+          <div className="bg-[#FFD43B] rounded-xl p-5 text-left space-y-3">
+            <span className="inline-block bg-[#1A1A1A] text-white text-[11px] font-bold uppercase tracking-widest rounded-full px-3.5 py-1.5">
+              21-Day Promise
+            </span>
+            <p className="text-[15px] text-[#1A1A1A] leading-relaxed">
+              Every match is proposed by our matching software and then reviewed by a person, so now and
+              then it takes a little longer. If a pen pal isn't confirmed within 21 days of joining, we
+              pause your billing automatically until the match is made — nothing for you to do, no email
+              to send. We'd rather find the right match than rush one.
+            </p>
+          </div>
+
           <p className="text-xs text-gray-400">Questions? Reply to your welcome email and we'll get back to you.</p>
         </div>
       </div>
@@ -608,7 +625,7 @@ export default function Onboarding() {
             <p className="text-sm font-semibold text-[#DD4B39]">Before you start:</p>
             <ul className="text-sm text-gray-700 space-y-1">
               <li>📋 <strong>One section per child</strong> — if you have multiple children, click "Add another child" below</li>
-              <li>🎂 <strong>Date of birth</strong> helps us match by age and send birthday reminders to their pen pal</li>
+              <li>🎂 <strong>Date of birth</strong> helps us match by age</li>
               <li>💡 <strong>Interests</strong> are the most important part — the more you pick, the better the match!</li>
               <li>✅ Submit once at the end — we'll add all your children at the same time</li>
             </ul>

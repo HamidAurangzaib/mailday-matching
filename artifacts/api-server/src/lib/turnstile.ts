@@ -1,8 +1,9 @@
 /**
  * Cloudflare Turnstile verification (A5 — bot protection on public forms).
  *
- * The three public forms (enroll, onboarding, give-a-key apply) send a Turnstile
- * token with each submit; we verify it server-side here before processing.
+ * The public forms (onboarding, give-a-key apply + po-box, address-change) send
+ * a Turnstile token with each submit; we verify it server-side here before
+ * processing.
  * A browser-only check is trivially bypassed, so this server check is the real
  * protection.
  *

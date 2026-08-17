@@ -129,10 +129,8 @@ function NavTree({
   isAdmin,
   isVA,
   totalActionItems,
-  copiedEnroll,
   copiedGak,
   copiedPoBox,
-  onCopyEnroll,
   onCopyGak,
   onCopyPoBox,
   onNavigate,
@@ -141,10 +139,8 @@ function NavTree({
   isAdmin: boolean;
   isVA: boolean;
   totalActionItems: number;
-  copiedEnroll: boolean;
   copiedGak: boolean;
   copiedPoBox: boolean;
-  onCopyEnroll: () => void;
   onCopyGak: () => void;
   onCopyPoBox: () => void;
   onNavigate?: () => void;
@@ -212,7 +208,6 @@ function NavTree({
         <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground px-1 mb-1.5">Quick Links</div>
         <div className="rounded-lg border overflow-hidden divide-y divide-border">
           {[
-            { label: "Enrollment Form", onClick: onCopyEnroll, copied: copiedEnroll },
             { label: "GAK Application", onClick: onCopyGak,    copied: copiedGak   },
             { label: "PO Box Form",      onClick: onCopyPoBox,  copied: copiedPoBox },
           ].map(({ label, onClick, copied }) => (
@@ -255,7 +250,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const [currentPw, setCurrentPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
-  const [copiedEnroll, setCopiedEnroll] = useState(false);
   const [copiedGak, setCopiedGak] = useState(false);
   const [copiedPoBox, setCopiedPoBox] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -325,10 +319,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     isAdmin,
     isVA,
     totalActionItems,
-    copiedEnroll,
     copiedGak,
     copiedPoBox,
-    onCopyEnroll: () => copyLink("/enroll", setCopiedEnroll),
     onCopyGak:    () => copyLink("/give-a-key/apply", setCopiedGak),
     onCopyPoBox:  () => copyLink("/give-a-key/po-box", setCopiedPoBox),
   };
