@@ -10,6 +10,7 @@ import { supabase } from "./supabase.js";
 import { logger } from "./logger.js";
 import { logAudit } from "./audit.js";
 import { emitKlaviyoEvent } from "./klaviyo-events.js";
+import { guaranteeStartDate } from "./guarantee-clock.js";
 
 // ─── requeueChild ───────────────────────────────────────────────────────────
 
@@ -51,7 +52,7 @@ export async function requeueChild(args: RequeueArgs): Promise<RequeueResult> {
 
   const updateFields: Record<string, unknown> = {
     match_status: "Rematch Requested",
-    match_guarantee_start_date: today,
+    match_guarantee_start_date: guaranteeStartDate(),
   };
 
   // Orphans get explicit priority; requesters get explicit non-priority so

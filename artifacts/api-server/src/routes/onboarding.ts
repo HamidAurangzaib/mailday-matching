@@ -4,6 +4,7 @@ import { differenceInDays, parseISO } from "date-fns";
 import { computeAge, computeTier } from "../lib/age.js";
 import { verifyTurnstile, tokenFromBody } from "../lib/turnstile.js";
 import { GAK_ADDRESS_TYPE, AWAITING_ADDRESS } from "../lib/gak-address.js";
+import { guaranteeStartDate } from "../lib/guarantee-clock.js";
 
 const router: IRouter = Router();
 
@@ -11,6 +12,23 @@ const router: IRouter = Router();
 // lifecycle map; also closes audit gap §4.7). The token is created with the
 // parent row, so `created_at` is the issue time.
 const ONBOARDING_TOKEN_TTL_DAYS = 30;
+
+/**
+ * Whether a family's onboarding link has expired.
+ *
+ * `onboarding_token_expires_at` is an explicit override and wins when set, so a
+ * link can be reissued for a family who missed their window without falsifying
+ * their join date. When it is NULL we fall back to the original rule.
+ */
+function onboardingLinkExpired(parent: {
+  created_at?: unknown;
+  onboarding_token_expires_at?: unknown;
+}): boolean {
+  const override = parent.onboarding_token_expires_at as string | null | undefined;
+  if (override) return new Date() > parseISO(override);
+  if (!parent.created_at) return false;
+  return differenceInDays(new Date(), parseISO(parent.created_at as string)) > ONBOARDING_TOKEN_TTL_DAYS;
+}
 
 // Guardian attestation (item D1) — the exact statements the attorney specified.
 // Versioned so a stored `guardian_attestation_version` always maps back to the
@@ -29,7 +47,7 @@ const VALID_TIERS = ["Core", "Minis", "Homeschool Core", "Homeschool Minis"];
 async function loadParentByToken(token: string) {
   const { data } = await supabase
     .from("parents")
-    .select("id, membership_tier, created_at, guardian_attestation_at, address_share_ack_at")
+    .select("id, membership_tier, created_at, onboarding_token_expires_at, guardian_attestation_at, address_share_ack_at")
     .eq("onboarding_token", token)
     .single();
   return data;
@@ -88,7 +106,7 @@ router.get("/onboarding/:token", async (req, res) => {
   try {
     const { data: parent, error } = await supabase
       .from("parents")
-      .select("id, first_name, last_name, email, membership_tier, state, mailing_address, address_type, created_at")
+      .select("id, first_name, last_name, email, membership_tier, state, mailing_address, address_type, created_at, onboarding_token_expires_at")
       .eq("onboarding_token", req.params.token)
       .single();
 
@@ -98,14 +116,11 @@ router.get("/onboarding/:token", async (req, res) => {
     }
 
     // 30-day expiry check
-    if (parent.created_at) {
-      const age = differenceInDays(new Date(), parseISO(parent.created_at as string));
-      if (age > ONBOARDING_TOKEN_TTL_DAYS) {
-        res.status(410).json({
-          error: "This onboarding link has expired. Please contact MailDay to receive a new one.",
-        });
-        return;
-      }
+    if (onboardingLinkExpired(parent)) {
+      res.status(410).json({
+        error: "This onboarding link has expired. Please contact MailDay to receive a new one.",
+      });
+      return;
     }
 
     // Phase 8: tell the form which memberships this family actually purchased,
@@ -115,8 +130,9 @@ router.get("/onboarding/:token", async (req, res) => {
     const { available: availableSlots } = await fetchSlots(parent.id as string);
 
     // Don't leak created_at to the client (used only for the expiry check)
-    const { created_at, ...safeParent } = parent as Record<string, unknown>;
+    const { created_at, onboarding_token_expires_at, ...safeParent } = parent as Record<string, unknown>;
     void created_at;
+    void onboarding_token_expires_at;
     res.json({
       ...safeParent,
       available_memberships: availableSlots,
@@ -154,12 +170,9 @@ router.post("/onboarding/:token/attestation", async (req, res) => {
       res.status(404).json({ error: "Invalid or expired onboarding link" });
       return;
     }
-    if (parent.created_at) {
-      const age = differenceInDays(new Date(), parseISO(parent.created_at as string));
-      if (age > ONBOARDING_TOKEN_TTL_DAYS) {
-        res.status(410).json({ error: "This onboarding link has expired. Please contact MailDay to receive a new one." });
-        return;
-      }
+    if (onboardingLinkExpired(parent)) {
+      res.status(410).json({ error: "This onboarding link has expired. Please contact MailDay to receive a new one." });
+      return;
     }
 
     // The form requires all four; the server confirms it too so the record can't
@@ -233,7 +246,7 @@ router.post("/onboarding/:token/child", async (req, res) => {
   try {
     const { data: parent, error: parentErr } = await supabase
       .from("parents")
-      .select("id, membership_tier, created_at, mailing_address, address_type")
+      .select("id, membership_tier, created_at, onboarding_token_expires_at, mailing_address, address_type")
       .eq("onboarding_token", req.params.token)
       .single();
 
@@ -244,14 +257,11 @@ router.post("/onboarding/:token/child", async (req, res) => {
 
     // Re-check 30-day expiry on submit (GET expiry guards the form load, but a
     // window left open for a month shouldn't be able to submit either).
-    if (parent.created_at) {
-      const age = differenceInDays(new Date(), parseISO(parent.created_at as string));
-      if (age > ONBOARDING_TOKEN_TTL_DAYS) {
-        res.status(410).json({
-          error: "This onboarding link has expired. Please contact MailDay to receive a new one.",
-        });
-        return;
-      }
+    if (onboardingLinkExpired(parent)) {
+      res.status(410).json({
+        error: "This onboarding link has expired. Please contact MailDay to receive a new one.",
+      });
+      return;
     }
 
     const body = req.body;
@@ -351,7 +361,7 @@ router.post("/onboarding/:token/child", async (req, res) => {
       homeschool_approach: body.homeschool_approach,
       match_status: awaitingAddress ? AWAITING_ADDRESS : "Unmatched",
       rematch_count: 0,
-      match_guarantee_start_date: awaitingAddress ? null : today,
+      match_guarantee_start_date: awaitingAddress ? null : guaranteeStartDate(),
       billing_paused: false,
       safety_flag: false,
       created_date: today,

@@ -11,6 +11,7 @@ import { computeSubscriptionMonth, computePriorityTier } from "../lib/subscripti
 import { declineAddressConsent } from "./lifecycle-jobs.js";
 import { matchingEnabled, MATCHING_DISABLED_MESSAGE } from "../lib/matching-flag.js";
 import { resumeGuaranteePause } from "../lib/guarantee-pause.js";
+import { guaranteeStartDate } from "../lib/guarantee-clock.js";
 
 const router: IRouter = Router();
 
@@ -636,11 +637,11 @@ router.patch("/matches/:id", requireAuth, async (req: AuthRequest, res) => {
         await Promise.all([
           supabase.from("children").update({
             match_status: "Unmatched",
-            match_guarantee_start_date: today,
+            match_guarantee_start_date: guaranteeStartDate(),
           }).eq("id", match.child_a_id),
           supabase.from("children").update({
             match_status: "Unmatched",
-            match_guarantee_start_date: today,
+            match_guarantee_start_date: guaranteeStartDate(),
           }).eq("id", match.child_b_id),
         ]);
 

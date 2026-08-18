@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { supabase } from "../lib/supabase.js";
 import { requireAuth, requireAdmin, type AuthRequest } from "../middlewares/auth.js";
+import { logAudit } from "../lib/audit.js";
 
 const router: IRouter = Router();
 
@@ -222,6 +223,70 @@ router.patch("/parents/:id", requireAuth, async (req: AuthRequest, res) => {
     res.json(data);
   } catch (err) {
     req.log?.error({ err }, "Error updating parent");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// PATCH /api/parents/:id/onboarding-link — extend a family's onboarding link.
+//
+// Expiry used to be derived from the parent's record age, which meant a family
+// who missed their 30-day window could not be helped without falsifying their
+// join date. This sets an explicit expiry instead.
+//
+// The token is deliberately NOT regenerated: any link already emailed to the
+// family keeps working, just for longer. Reissuing a new token would silently
+// break the link in an email they may already be looking at.
+router.patch("/parents/:id/onboarding-link", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    const days = Number((req.body as { days?: unknown } | undefined)?.days ?? 30);
+    if (!Number.isFinite(days) || days < 1 || days > 365) {
+      res.status(400).json({ error: "days must be between 1 and 365" });
+      return;
+    }
+
+    const { data: parent } = await supabase
+      .from("parents")
+      .select("id, email, onboarding_token, onboarding_token_expires_at")
+      .eq("id", req.params["id"])
+      .single();
+
+    if (!parent) {
+      res.status(404).json({ error: "Parent not found" });
+      return;
+    }
+    if (!parent.onboarding_token) {
+      res.status(400).json({ error: "This family has no onboarding link to extend." });
+      return;
+    }
+
+    const expiresAt = new Date(Date.now() + days * 86400000).toISOString();
+
+    const { error } = await supabase
+      .from("parents")
+      .update({ onboarding_token_expires_at: expiresAt })
+      .eq("id", parent.id);
+
+    if (error) {
+      req.log?.error({ error }, "Failed to extend onboarding link");
+      res.status(500).json({ error: "Failed to extend the onboarding link" });
+      return;
+    }
+
+    await logAudit({
+      actorEmail: req.user?.email ?? "admin",
+      action: "parent.onboarding_link_extended",
+      entityType: "parent",
+      entityId: parent.id as string,
+      payloadBefore: { onboarding_token_expires_at: parent.onboarding_token_expires_at ?? null },
+      payloadAfter: { onboarding_token_expires_at: expiresAt },
+      metadata: { days },
+      req,
+    });
+
+    req.log?.info({ parentId: parent.id, days, expiresAt }, "Onboarding link extended");
+    res.json({ success: true, expires_at: expiresAt, days });
+  } catch (err) {
+    req.log?.error({ err }, "Error extending onboarding link");
     res.status(500).json({ error: "Internal server error" });
   }
 });

@@ -36,6 +36,7 @@ import { computeSubscriptionMonth } from "../lib/subscription.js";
 import { appBaseUrl } from "../lib/app-url.js";
 import { AWAITING_ADDRESS } from "../lib/gak-address.js";
 import { getSubscription, changeNextChargeDate } from "../lib/recharge.js";
+import { guaranteeStartDate } from "../lib/guarantee-clock.js";
 
 const router: IRouter = Router();
 
@@ -728,7 +729,7 @@ async function handleAddressConsentTimeout(
       // doesn't immediately pounce), and email them a reactivate link.
       await addPauseReason(p.own.id, "address_consent");
       await supabase.from("children")
-        .update({ match_status: "Unmatched", match_guarantee_start_date: today })
+        .update({ match_status: "Unmatched", match_guarantee_start_date: guaranteeStartDate() })
         .eq("id", p.own.id);
 
       if (parent?.email) {
@@ -874,7 +875,7 @@ export async function declineAddressConsent(
   // and queue a human to handle their ReCharge subscription.
   if (declining) {
     await supabase.from("children")
-      .update({ match_status: "Unmatched", match_guarantee_start_date: today })
+      .update({ match_status: "Unmatched", match_guarantee_start_date: guaranteeStartDate() })
       .eq("id", declining.id);
     if (declining.parents?.email) {
       const res = await sendEmail({

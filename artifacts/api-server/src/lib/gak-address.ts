@@ -17,6 +17,7 @@
 import { supabase } from "./supabase.js";
 import { logAudit } from "./audit.js";
 import { logger } from "./logger.js";
+import { guaranteeStartDate } from "./guarantee-clock.js";
 
 /** The 4th address-type option at onboarding (A6). */
 export const GAK_ADDRESS_TYPE = "Give a Key PO Box";
@@ -82,7 +83,9 @@ export async function activateAwaitingAddressChildren(
     .update({ mailing_address: address, address_type: "PO Box" })
     .eq("id", parent.id);
 
-  const today = new Date().toISOString().split("T")[0];
+  // Floored to the matching-open date, so a family released before matching
+  // opens does not start burning their guarantee early.
+  const clockStart = guaranteeStartDate();
   const { error } = await supabase
     .from("children")
     .update({
@@ -91,7 +94,7 @@ export async function activateAwaitingAddressChildren(
       // The match guarantee starts when the child actually becomes matchable.
       // Dating it from onboarding would put a family who waited weeks for their
       // PO Box straight into guarantee breach on the day they join the pool.
-      match_guarantee_start_date: today,
+      match_guarantee_start_date: clockStart,
     })
     .eq("parent_id", parent.id)
     .eq("match_status", AWAITING_ADDRESS);
@@ -108,7 +111,7 @@ export async function activateAwaitingAddressChildren(
       entityType: "child",
       entityId: child.id as string,
       payloadBefore: { match_status: AWAITING_ADDRESS },
-      payloadAfter: { match_status: "Unmatched", match_guarantee_start_date: today },
+      payloadAfter: { match_status: "Unmatched", match_guarantee_start_date: clockStart },
       metadata: { applicationId, source: opts.source ?? "gak_activation" },
     });
   }

@@ -17,7 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import {
   Mail, Phone, MapPin, Calendar, User, Pencil, Check, X, ChevronRight, Link, Copy,
-  CircleDot, Pause, ShieldAlert, Trash2,
+  CircleDot, Pause, ShieldAlert, Trash2, CalendarPlus,
 } from "lucide-react";
 
 type ParentWithExtras = Parent & {
@@ -58,6 +58,7 @@ export function ParentSheet({ parentId, open, onClose, isAdmin, onOpenChild }: P
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesValue, setNotesValue] = useState("");
   const [copiedLink, setCopiedLink] = useState(false);
+  const [extended, setExtended] = useState(false);
   const [copiedEmail, setCopiedEmail] = useState(false);
 
   const copyEmail = (email: string) => {
@@ -75,6 +76,22 @@ export function ParentSheet({ parentId, open, onClose, isAdmin, onOpenChild }: P
       setTimeout(() => setCopiedLink(false), 2000);
     });
   };
+
+  // A family who missed their 30-day window (ours or theirs) can be given more
+  // time without falsifying their join date. The token is unchanged, so any link
+  // already sitting in their inbox keeps working.
+  const extendLink = useMutation({
+    mutationFn: () =>
+      customFetch<{ expires_at: string }>(`/api/parents/${parentId}/onboarding-link`, {
+        method: "PATCH",
+        body: JSON.stringify({ days: 30 }),
+      }),
+    onSuccess: () => {
+      setExtended(true);
+      setTimeout(() => setExtended(false), 3000);
+      void queryClient.invalidateQueries({ queryKey: ["parent", parentId] });
+    },
+  });
 
   const { data: parent, isLoading } = useQuery({
     queryKey: ["parent", parentId],
@@ -212,11 +229,11 @@ export function ParentSheet({ parentId, open, onClose, isAdmin, onOpenChild }: P
 
             {/* Onboarding link — admin only */}
             {isAdmin && (parent as ParentWithChildren & { onboarding_token?: string }).onboarding_token && (
-              <div className="mb-3">
+              <div className="mb-3 flex gap-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full h-8 text-xs gap-1.5"
+                  className="flex-1 h-8 text-xs gap-1.5"
                   onClick={() => copyOnboardingLink(
                     (parent as ParentWithChildren & { onboarding_token: string }).onboarding_token
                   )}
@@ -225,6 +242,20 @@ export function ParentSheet({ parentId, open, onClose, isAdmin, onOpenChild }: P
                     <><Check className="w-3.5 h-3.5 text-green-600" /> Link copied!</>
                   ) : (
                     <><Link className="w-3.5 h-3.5" /> Copy onboarding link</>
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs gap-1.5 shrink-0"
+                  title="Give this family another 30 days to complete their form. The link itself doesn't change."
+                  disabled={extendLink.isPending}
+                  onClick={() => extendLink.mutate()}
+                >
+                  {extended ? (
+                    <><Check className="w-3.5 h-3.5 text-green-600" /> +30 days</>
+                  ) : (
+                    <><CalendarPlus className="w-3.5 h-3.5" /> Extend</>
                   )}
                 </Button>
               </div>

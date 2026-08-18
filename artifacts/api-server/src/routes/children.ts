@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { differenceInDays, parseISO } from "date-fns";
 import { supabase } from "../lib/supabase.js";
 import { requireAuth, requireAdmin, type AuthRequest } from "../middlewares/auth.js";
+import { guaranteeStartDate } from "../lib/guarantee-clock.js";
 
 const router: IRouter = Router();
 
@@ -296,7 +297,7 @@ router.post("/children", requireAuth, async (req: AuthRequest, res) => {
         homeschool_approach: body.homeschool_approach,
         match_status: "Unmatched",
         rematch_count: 0,
-        match_guarantee_start_date: today,
+        match_guarantee_start_date: guaranteeStartDate(),
         billing_paused: false,
         safety_flag: body.safety_flag ?? false,
         internal_notes: body.internal_notes,
@@ -469,7 +470,7 @@ router.delete("/children/:id", requireAuth, requireAdmin, async (req: AuthReques
         .from("children")
         .update({
           match_status: "Rematch Requested",
-          match_guarantee_start_date: new Date().toISOString().split("T")[0],
+          match_guarantee_start_date: guaranteeStartDate(),
         })
         .in("id", partnerIds);
     }

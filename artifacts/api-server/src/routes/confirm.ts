@@ -18,6 +18,7 @@ import { emitKlaviyoEvent } from "../lib/klaviyo-events.js";
 import { removePauseReason } from "../lib/pause.js";
 import { reopenMatchForReconsent } from "../lib/match-consent.js";
 import { activateAwaitingAddressChildren } from "../lib/gak-address.js";
+import { guaranteeStartDate } from "../lib/guarantee-clock.js";
 
 const router: IRouter = Router();
 
@@ -496,7 +497,7 @@ router.get("/confirm/:token", async (req, res) => {
           await removePauseReason(consumed.child_id, "address_consent");
           await supabase
             .from("children")
-            .update({ match_status: "Unmatched", match_guarantee_start_date: today })
+            .update({ match_status: "Unmatched", match_guarantee_start_date: guaranteeStartDate() })
             .eq("id", consumed.child_id);
 
           const { data: taskExists } = await supabase
