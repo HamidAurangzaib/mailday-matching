@@ -105,6 +105,9 @@ export async function syncRechargeSubscriptions(): Promise<SyncResult> {
 
     // Group subscriptions by email — resolve missing emails via customer lookup
     const byEmail = new Map<string, string[]>(); // email → statuses[]
+    // email → ids of subscriptions that are still live. Used to link a family to
+    // exactly one subscription for the guarantee auto-pause (see below).
+    const liveIdsByEmail = new Map<string, string[]>();
 
     for (const sub of subscriptions) {
       let email = sub.email?.toLowerCase() ?? null;
@@ -113,15 +116,27 @@ export async function syncRechargeSubscriptions(): Promise<SyncResult> {
       }
       if (!email) continue;
 
+      const status = sub.status.toUpperCase();
       const statuses = byEmail.get(email) ?? [];
-      statuses.push(sub.status.toUpperCase());
+      statuses.push(status);
       byEmail.set(email, statuses);
+
+      if (status === "ACTIVE" || status === "PAUSED") {
+        const ids = liveIdsByEmail.get(email) ?? [];
+        ids.push(String(sub.id));
+        liveIdsByEmail.set(email, ids);
+      }
     }
 
     // For each email, determine billing_paused:
     // If ANY subscription is ACTIVE → not paused (they still have access)
     // If ALL subscriptions are PAUSED/CANCELLED/EXPIRED → paused
-    const updates: Array<{ email: string; billing_paused: boolean; subscription_status: string }> = [];
+    const updates: Array<{
+      email: string;
+      billing_paused: boolean;
+      subscription_status: string;
+      soleSubscriptionId: string | null;
+    }> = [];
 
     for (const [email, statuses] of byEmail) {
       const hasActive = statuses.some((s) => s === "ACTIVE");
@@ -132,33 +147,90 @@ export async function syncRechargeSubscriptions(): Promise<SyncResult> {
         statuses.includes("PAUSED")    ? "Paused"    :
         statuses.includes("CANCELLED") ? "Cancelled" : "Expired";
 
-      updates.push({ email, billing_paused, subscription_status: dominant });
+      const liveIds = liveIdsByEmail.get(email) ?? [];
+      updates.push({
+        email,
+        billing_paused,
+        subscription_status: dominant,
+        // Only link when it is unambiguous. A family on the per-child membership
+        // model can hold several subscriptions, and we will not guess which
+        // child's membership the guarantee auto-pause should stop — those
+        // families keep the manual task.
+        soleSubscriptionId: liveIds.length === 1 ? liveIds[0]! : null,
+      });
     }
 
     // Batch update parents
     for (const update of updates) {
-      const { data: parent, error } = await supabase
+      const { data: existing } = await supabase
         .from("parents")
-        .update({
-          billing_paused: update.billing_paused,
-          subscription_status: update.subscription_status,
-        })
+        .select("id, pause_type")
         .eq("email", update.email)
-        .select("id")
         .single();
 
-      if (error || !parent) continue;
+      if (!existing) continue;
+
+      // A guarantee pause is OURS, not ReCharge's. We pause a family by pushing
+      // their next charge date forward, which leaves the subscription ACTIVE in
+      // ReCharge — so a naive sync would read "active" and clear the pause within
+      // the hour, silently undoing the 21-day promise. Hold it until the match is
+      // made and the resume path clears pause_type.
+      const holdForGuarantee = existing.pause_type === "guarantee";
+      const parentPaused = update.billing_paused || holdForGuarantee;
+
+      const parentUpdate: Record<string, unknown> = {
+        billing_paused: parentPaused,
+        subscription_status: update.subscription_status,
+      };
+      // Link the family to their subscription when there is exactly one, so the
+      // guarantee auto-pause knows what to act on.
+      if (update.soleSubscriptionId) {
+        parentUpdate["recharge_subscription_id"] = update.soleSubscriptionId;
+      }
+
+      const { error } = await supabase
+        .from("parents")
+        .update(parentUpdate)
+        .eq("id", existing.id);
+
+      if (error) continue;
 
       result.parentsUpdated++;
 
-      // Mirror billing_paused to all children of this parent
-      const { data: updatedChildren } = await supabase
+      // Mirror to children — but never clear a child whose pause is held by the
+      // A4 pause_reasons list (address consent, etc.). Those are our pauses too,
+      // and ReCharge knows nothing about them.
+      const { data: kids } = await supabase
         .from("children")
-        .update({ billing_paused: update.billing_paused })
-        .eq("parent_id", parent.id)
-        .select("id");
+        .select("id, pause_reasons")
+        .eq("parent_id", existing.id);
 
-      result.childrenUpdated += updatedChildren?.length ?? 0;
+      // Partition rather than updating child-by-child: this job sweeps the whole
+      // member base every hour, so it stays at a fixed few queries per family.
+      const heldByReason: string[] = [];
+      const followParent: string[] = [];
+      for (const kid of kids ?? []) {
+        const reasons = (kid.pause_reasons as string[] | null) ?? [];
+        if (reasons.length > 0) heldByReason.push(kid.id as string);
+        else followParent.push(kid.id as string);
+      }
+
+      if (followParent.length > 0) {
+        const { data: updated } = await supabase
+          .from("children")
+          .update({ billing_paused: parentPaused })
+          .in("id", followParent)
+          .select("id");
+        result.childrenUpdated += updated?.length ?? 0;
+      }
+      if (heldByReason.length > 0) {
+        const { data: updated } = await supabase
+          .from("children")
+          .update({ billing_paused: true })
+          .in("id", heldByReason)
+          .select("id");
+        result.childrenUpdated += updated?.length ?? 0;
+      }
     }
 
     logger.info(result, "ReCharge sync completed");

@@ -35,6 +35,7 @@ import { emitKlaviyoEvent } from "../lib/klaviyo-events.js";
 import { computeSubscriptionMonth } from "../lib/subscription.js";
 import { appBaseUrl } from "../lib/app-url.js";
 import { AWAITING_ADDRESS } from "../lib/gak-address.js";
+import { getSubscription, changeNextChargeDate } from "../lib/recharge.js";
 
 const router: IRouter = Router();
 
@@ -56,6 +57,11 @@ const WINBACK_FAIL_AFTER_DAYS = 60;
 /** A6: a Give-a-Key family with still no address after this many days gets a
  *  follow-up task. A nudge only — never a cancellation. */
 const GAK_ADDRESS_OVERDUE_DAYS = 30;
+/** How far forward a guarantee pause pushes the next ReCharge charge date. One
+ *  billing cycle: long enough to stop the next charge, short enough that a
+ *  family whose pause is somehow never resumed reappears rather than silently
+ *  billing years out. The job re-pushes on each run while they stay unmatched. */
+const GUARANTEE_PAUSE_PUSH_DAYS = 30;
 
 // ─── Block B: Incomplete-onboarding nudge ────────────────────────────────────
 
@@ -268,7 +274,7 @@ export async function runGuaranteeBreachJob(): Promise<GuaranteeBreachResult> {
   const parentIds = [...new Set(children.map((c) => c.parent_id))];
   const { data: parents } = await supabase
     .from("parents")
-    .select("id, first_name, email, pause_type, billing_paused, subscription_status")
+    .select("id, first_name, email, pause_type, billing_paused, subscription_status, recharge_subscription_id")
     .in("id", parentIds);
 
   const parentMap = new Map((parents ?? []).map((p) => [p.id, p]));
@@ -316,6 +322,64 @@ export async function runGuaranteeBreachJob(): Promise<GuaranteeBreachResult> {
         .eq("parent_id", parent.id);
       result.newlyFlagged++;
 
+      // 4a-bis. Stop the money.
+      //
+      // ReCharge has no pause primitive, so pausing means pushing the next
+      // charge date forward. We only act when the sync has linked this family to
+      // exactly ONE subscription — with per-child memberships a family can hold
+      // several, and stopping a sibling's membership would be worse than the
+      // manual step this replaces. Everything else falls back to the task below.
+      //
+      // Writes are dry-run unless RECHARGE_WRITES_ENABLED=true, so this logs its
+      // intent and changes nothing until that is deliberately switched on.
+      let autoPause: "applied" | "dry_run" | "no_link" | "failed" = "no_link";
+      const subscriptionId = parent.recharge_subscription_id as string | null;
+
+      if (subscriptionId) {
+        const sub = await getSubscription(subscriptionId);
+        const originalDate = sub?.next_charge_scheduled_at
+          ? sub.next_charge_scheduled_at.split("T")[0]!
+          : null;
+        const pushedTo = new Date(now.getTime() + GUARANTEE_PAUSE_PUSH_DAYS * 86400000)
+          .toISOString()
+          .split("T")[0]!;
+
+        const moved = await changeNextChargeDate(subscriptionId, pushedTo, {
+          parentId: parent.id,
+          reason: "guarantee_breach",
+          originalDate,
+        });
+
+        if (moved.ok && !moved.dryRun) {
+          autoPause = "applied";
+          // Remember the real schedule so resuming restores it rather than
+          // inventing a date. Written only on a genuine apply, so the resume
+          // path can tell our pause from a manual one.
+          await supabase
+            .from("parents")
+            .update({
+              guarantee_pause_original_charge_date: originalDate,
+              guarantee_pause_applied_at: new Date().toISOString(),
+            })
+            .eq("id", parent.id);
+          await logAudit({
+            action: "parent.guarantee_billing_paused",
+            entityType: "parent",
+            entityId: parent.id as string,
+            payloadBefore: { next_charge_date: originalDate },
+            payloadAfter: { next_charge_date: pushedTo },
+            metadata: { subscriptionId, source: "guarantee_breach_cron" },
+          });
+        } else if (moved.ok) {
+          autoPause = "dry_run";
+        } else {
+          autoPause = "failed";
+          result.errors.push(
+            `ReCharge auto-pause failed for ${parent.email}: ${moved.error ?? "unknown"}`,
+          );
+        }
+      }
+
       // 4b. Send R3 (guarantee_breach template).
       const sendResult = await sendEmail({
         to: parent.email as string,
@@ -336,11 +400,29 @@ export async function runGuaranteeBreachJob(): Promise<GuaranteeBreachResult> {
       if (!taskedParents.has(parent.id)) {
         const { error: taskErr } = await supabase.from("lifecycle_tasks").insert({
           type: "contact_guarantee_breach",
-          title: `Guarantee breach — pause ReCharge for ${parent.first_name ?? parent.email}`,
+          title:
+            autoPause === "applied"
+              ? `Guarantee breach — billing already paused for ${parent.first_name ?? parent.email}`
+              : `Guarantee breach — pause ReCharge for ${parent.first_name ?? parent.email}`,
           description:
-            "App has set billing_paused locally and sent the guarantee-breach email. " +
-            "Action: log into ReCharge and pause this family's subscription. " +
-            "Once you've paused in ReCharge and personally followed up, click 'Mark confirmed'.",
+            autoPause === "applied"
+              ? "Billing has ALREADY been paused automatically — the next charge date was pushed " +
+                `${GUARANTEE_PAUSE_PUSH_DAYS} days forward and is restored when the match is made. ` +
+                "No ReCharge action needed. Action: follow up with the family personally, then " +
+                "click 'Mark confirmed'."
+              : autoPause === "dry_run"
+              ? "App has set billing_paused locally and sent the guarantee-breach email. " +
+                "Auto-pause is in DRY RUN (RECHARGE_WRITES_ENABLED is not set), so nothing changed " +
+                "in ReCharge. Action: pause this family's subscription by hand, follow up, then " +
+                "click 'Mark confirmed'."
+              : autoPause === "failed"
+              ? "App has set billing_paused locally and sent the guarantee-breach email. " +
+                "The automatic pause FAILED — see the logs. Action: pause this family's " +
+                "subscription in ReCharge by hand, follow up, then click 'Mark confirmed'."
+              : "App has set billing_paused locally and sent the guarantee-breach email. " +
+                "This family has no single linked subscription (they may hold several), so billing " +
+                "was not paused automatically. Action: log into ReCharge and pause the right " +
+                "subscription, follow up, then click 'Mark confirmed'.",
           parent_id: parent.id,
           child_id: child.id,
         });

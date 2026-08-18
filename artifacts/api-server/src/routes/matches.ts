@@ -10,6 +10,7 @@ import { requeueChild } from "../lib/lifecycle.js";
 import { computeSubscriptionMonth, computePriorityTier } from "../lib/subscription.js";
 import { declineAddressConsent } from "./lifecycle-jobs.js";
 import { matchingEnabled, MATCHING_DISABLED_MESSAGE } from "../lib/matching-flag.js";
+import { resumeGuaranteePause } from "../lib/guarantee-pause.js";
 
 const router: IRouter = Router();
 
@@ -260,6 +261,16 @@ router.post("/matches", requireAuth, async (req: AuthRequest, res) => {
         rematch_priority: false,
       }).eq("id", child_b_id),
     ]);
+
+    // The match is what earns their billing back: if either family was paused
+    // for passing 21 days unmatched, put their ReCharge charge date back where
+    // it was. Best-effort by design — resumeGuaranteePause never throws, so a
+    // ReCharge hiccup cannot stop two children being matched. On failure the
+    // flags stay set and the family stays un-billed until it succeeds, which is
+    // the safe direction to fail.
+    for (const parentId of new Set([childA.parents!.id, childB.parents!.id])) {
+      await resumeGuaranteePause(parentId, { actorEmail: req.user?.email });
+    }
 
     // Generate the per-parent one-click confirmation links + send R2 to each.
     // Each parent sees fun facts about THEIR child's pen pal (the other child).
