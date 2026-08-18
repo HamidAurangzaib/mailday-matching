@@ -57,7 +57,7 @@ async function loadParentByToken(token: string) {
 // parent must actively pick one. A6 adds the Give-a-Key option, which is the
 // only one that may be submitted without an address: those families are still
 // waiting for a PO Box to exist.
-const ONBOARDING_ADDRESS_TYPES = ["Home", "Work", "PO Box", GAK_ADDRESS_TYPE];
+const ONBOARDING_ADDRESS_TYPES = ["Home", "Work", "PO Box", "Military (APO/FPO/DPO)", GAK_ADDRESS_TYPE];
 
 /** A tier is a "Minis" tier if it serves ages 3–5. */
 function isMinisTier(tier: string): boolean {

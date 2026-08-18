@@ -86,6 +86,10 @@ function calcAge(dob: string): number | null {
 
 // Address step (A4) — required address type + the exact sharing-consent wording.
 const ADDRESS_TYPES = ["Home", "Work", "PO Box"];
+// Military families move often, which makes a pen pal more valuable rather than
+// less. Given its own row: the label is long, and none of the other three
+// describe an APO/FPO/DPO address honestly.
+const MILITARY_ADDRESS_TYPE = "Military (APO/FPO/DPO)";
 // A6 — the one option that may be submitted with no address, because the family
 // is still waiting for the PO Box to exist. Must match the backend constant.
 const GAK_ADDRESS_TYPE = "Give a Key PO Box";
@@ -727,6 +731,25 @@ export default function Onboarding() {
                 </button>
               ))}
             </div>
+            {/* Own row: the label is long, and an APO/FPO/DPO address is not
+                honestly any of the other three. */}
+            <button
+              type="button"
+              onClick={() => setAddressType(MILITARY_ADDRESS_TYPE)}
+              className={`w-full p-2.5 rounded-lg border-2 text-sm font-medium transition-all text-left ${
+                addressType === MILITARY_ADDRESS_TYPE
+                  ? "border-[#DD4B39] bg-[#DD4B39]/5"
+                  : "border-gray-200 hover:border-gray-300"
+              }`}
+            >
+              Military (APO/FPO/DPO)
+            </button>
+            {addressType === MILITARY_ADDRESS_TYPE && (
+              <p className="text-xs text-gray-500">
+                Write it the way the post office expects — your PSC or unit on the street line, then
+                APO, FPO or DPO as the city, and AA, AE or AP as the state.
+              </p>
+            )}
             {/* Full width on its own row: the label is long, and it's a
                 different kind of answer from the other three. */}
             <button

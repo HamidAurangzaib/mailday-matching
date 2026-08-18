@@ -21,7 +21,7 @@ import { requireAuth, requireAdmin, type AuthRequest } from "../middlewares/auth
 import { sendEmail } from "../lib/email.js";
 import { logAudit } from "../lib/audit.js";
 import { differenceInDays, parseISO } from "date-fns";
-import { tierChangeOnAging, isCrossTier } from "../lib/age.js";
+import { tierChangeOnAging } from "../lib/age.js";
 import { offboardFamily, requeueChild } from "../lib/lifecycle.js";
 import { createConfirmationToken } from "../lib/confirmation.js";
 import { addPauseReason } from "../lib/pause.js";
@@ -1166,28 +1166,40 @@ export async function runFinaliseCancellations(): Promise<FinaliseCancellationsR
   return result;
 }
 
-// ─── Block 3.5 + 3.6: Aging-out cron + tier mismatch flag ────────────────────
+// ─── Block 3.5 + 3.6: age-band review (formerly the aging-out cron) ─────────
 
 export interface AgingResult {
   scanned: number;
-  agedOut: number;
-  matchesFlagged: number;
+  /** Children whose age band no longer matches their purchased tier. */
+  mismatched: number;
+  tasksCreated: number;
   errors: string[];
   ranAt: string;
 }
 
 /**
- * Daily aging-out cron. For each child with a date_of_birth:
- *   • Recompute the tier based on current age.
- *   • If different from their stored tier → update + audit.
- *   • If the child is in an Active match, check whether it's now cross-tier;
- *     if so, flag the match for admin review (Phase 3.6).
+ * Daily age-band check.
+ *
+ * This used to REWRITE a child's tier from their date of birth. That quietly
+ * contradicted the rule Phase 8 established — a child's tier comes from the
+ * membership purchased for them, not from their birthday — and it had a real
+ * cost: a parent who deliberately put a 5-year-old who already writes on Core
+ * would find them silently moved to Minis overnight, then receive the wrong
+ * pack. It also worked in reverse, dragging a deliberately-Minis 7-year-old up
+ * to Core. Both were observed in production on 2026-08-18.
+ *
+ * Moving a child between bands is also a BILLING change — Core and Minis are
+ * different memberships — so it was never something a cron should decide alone.
+ *
+ * So the cron now reports instead of acting: when a child's age band no longer
+ * matches their tier, it raises a review task and leaves the tier exactly as the
+ * parent bought it. A human decides whether to upgrade the membership.
  */
 export async function runAgingOutCron(): Promise<AgingResult> {
   const result: AgingResult = {
     scanned: 0,
-    agedOut: 0,
-    matchesFlagged: 0,
+    mismatched: 0,
+    tasksCreated: 0,
     errors: [],
     ranAt: new Date().toISOString(),
   };
@@ -1195,92 +1207,74 @@ export async function runAgingOutCron(): Promise<AgingResult> {
   const { data: children, error } = await supabase
     .from("children")
     .select("id, child_first_name, date_of_birth, tier, parent_id, match_status")
-    .not("date_of_birth", "is", null);
+    .not("date_of_birth", "is", null)
+    .in("match_status", ["Unmatched", "Rematch Requested", "Matched"]);
 
   if (error) {
     result.errors.push(`Failed to load children: ${error.message}`);
     return result;
   }
   if (!children || children.length === 0) {
-    logger.info(result, "Aging cron: no children with DOB");
+    logger.info(result, "Age-band cron: no children with DOB");
     return result;
   }
 
   result.scanned = children.length;
+
+  // Idempotency: one open review per child, so a family isn't re-flagged nightly.
+  const childIds = children.map((c) => c.id);
+  const { data: existingTasks } = await supabase
+    .from("lifecycle_tasks")
+    .select("child_id")
+    .eq("type", "review_tier_mismatch")
+    .eq("completed", false)
+    .in("child_id", childIds);
+  const alreadyFlagged = new Set((existingTasks ?? []).map((t) => t.child_id));
 
   for (const c of children) {
     try {
       const change = tierChangeOnAging(c.date_of_birth as string, c.tier as string);
       if (!change) continue;
 
-      await supabase.from("children").update({ tier: change.to }).eq("id", c.id);
-      result.agedOut++;
+      result.mismatched++;
+      if (alreadyFlagged.has(c.id)) continue;
 
-      await logAudit({
-        action: "child.tier_aged_out",
-        entityType: "child",
-        entityId: c.id,
-        payloadBefore: { tier: change.from },
-        payloadAfter: { tier: change.to },
-        metadata: { source: "aging_cron", child_first_name: c.child_first_name },
+      const direction =
+        change.to.includes("Minis")
+          ? `is younger than their ${change.from} membership usually serves`
+          : `has grown beyond their ${change.from} membership`;
+
+      const { error: taskErr } = await supabase.from("lifecycle_tasks").insert({
+        type: "review_tier_mismatch",
+        title: `Check membership — ${c.child_first_name} (${change.from})`,
+        description:
+          `${c.child_first_name} ${direction}, so by age alone they would sit in ${change.to}. ` +
+          "Their tier has NOT been changed — the membership their parent bought is the one that counts, " +
+          "and switching bands is a billing change. Decide whether to offer the family an upgrade, " +
+          "or close this if the parent chose deliberately.",
+        parent_id: c.parent_id,
+        child_id: c.id,
       });
 
-      // If they're in an Active match, the partner may now be cross-tier.
-      if (c.match_status === "Matched") {
-        const matchRow = await supabase
-          .from("matches")
-          .select("id, child_a_id, child_b_id, tier_mismatch_flagged")
-          .eq("match_status", "Active")
-          .or(`child_a_id.eq.${c.id},child_b_id.eq.${c.id}`)
-          .maybeSingle();
-        const match = matchRow.data as {
-          id: string;
-          child_a_id: string;
-          child_b_id: string;
-          tier_mismatch_flagged: boolean | null;
-        } | null;
-        if (match && !match.tier_mismatch_flagged) {
-          const partnerId = match.child_a_id === c.id ? match.child_b_id : match.child_a_id;
-          const partner = await supabase
-            .from("children")
-            .select("child_first_name, tier")
-            .eq("id", partnerId)
-            .single();
-          const partnerData = partner.data as { child_first_name: string; tier: string } | null;
-          if (partnerData && isCrossTier(change.to, partnerData.tier)) {
-            await supabase
-              .from("matches")
-              .update({ tier_mismatch_flagged: true })
-              .eq("id", match.id);
-
-            const { data: existing } = await supabase
-              .from("lifecycle_tasks")
-              .select("id")
-              .eq("type", "review_tier_mismatch")
-              .eq("completed", false)
-              .eq("match_id", match.id);
-
-            if (!existing || existing.length === 0) {
-              await supabase.from("lifecycle_tasks").insert({
-                type: "review_tier_mismatch",
-                title: `Tier mismatch — ${c.child_first_name} (${change.to}) & ${partnerData.child_first_name} (${partnerData.tier})`,
-                description:
-                  `${c.child_first_name} aged out of ${change.from} and is now ${change.to}, ` +
-                  `but their pen pal is still ${partnerData.tier}. Decide whether to dissolve.`,
-                match_id: match.id,
-                child_id: c.id,
-              });
-              result.matchesFlagged++;
-            }
-          }
-        }
+      if (taskErr) {
+        result.errors.push(`task create failed for child ${c.id}: ${taskErr.message}`);
+      } else {
+        result.tasksCreated++;
+        await logAudit({
+          action: "child.age_band_review_raised",
+          entityType: "child",
+          entityId: c.id as string,
+          payloadBefore: { tier: change.from },
+          payloadAfter: { tier: change.from, age_band_suggests: change.to },
+          metadata: { source: "age_band_cron", child_first_name: c.child_first_name },
+        });
       }
     } catch (err) {
       result.errors.push(`child ${c.id}: ${String(err)}`);
     }
   }
 
-  logger.info(result, "Aging cron completed");
+  logger.info(result, "Age-band cron completed");
   return result;
 }
 

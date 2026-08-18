@@ -131,6 +131,7 @@ export default function AddressChange() {
                 <SelectItem value="Home">🏠 Home address</SelectItem>
                 <SelectItem value="Work">🏢 Work address</SelectItem>
                 <SelectItem value="PO Box">📬 PO Box</SelectItem>
+                <SelectItem value="Military (APO/FPO/DPO)">🎖️ Military (APO/FPO/DPO)</SelectItem>
               </SelectContent>
             </Select>
             <Input

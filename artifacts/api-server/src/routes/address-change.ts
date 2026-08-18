@@ -6,7 +6,7 @@ import { verifyTurnstile, tokenFromBody } from "../lib/turnstile.js";
 
 const router: IRouter = Router();
 
-const ALLOWED_ADDRESS_TYPES = ["Home", "Work", "PO Box"];
+const ALLOWED_ADDRESS_TYPES = ["Home", "Work", "PO Box", "Military (APO/FPO/DPO)"];
 
 // POST /api/address-change/request — public self-service address change for an
 // existing member who has moved.
