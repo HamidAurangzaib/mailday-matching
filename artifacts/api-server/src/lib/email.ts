@@ -35,7 +35,8 @@ export type TemplateKey =
   | "consent_reminder_2"       // day 7, from MailDay
   | "consent_pause"            // day 14 — consent not given, billing paused
   | "consent_declined"         // parent actively declined at match time
-  | "match_didnt_work_out";    // partner family (timeout or decline)
+  | "match_didnt_work_out"     // partner family (timeout or decline)
+  | "tier_upgraded_to_core";   // child turned 7 and moved up from Minis
 
 export interface SendEmailArgs {
   to: string;

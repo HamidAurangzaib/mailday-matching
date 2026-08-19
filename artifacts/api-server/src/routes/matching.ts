@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabase.js";
 import { requireAuth, type AuthRequest } from "../middlewares/auth.js";
 import { differenceInDays, parseISO } from "date-fns";
 import { computeSubscriptionMonth } from "../lib/subscription.js";
+import { validateMatchPair, effectiveAge, MAX_AGE_GAP_YEARS } from "../lib/match-rules.js";
 
 const router: IRouter = Router();
 
@@ -83,7 +84,9 @@ router.post("/matching/run", requireAuth, async (req: AuthRequest, res) => {
       codeToId.set(code, c.id as string);
       return {
         id: code,
-        age: c.age,
+        // Derived from date_of_birth, not the legacy age column, so the AI and
+        // the rule check below are looking at the same number.
+        age: effectiveAge(c as { date_of_birth?: string | null; age?: number | null }),
         tier: c.tier,
         interests: c.interests || [],
         state: (c as Record<string, unknown> & { parents?: { state?: string } }).parents?.state || "Unknown",
@@ -116,7 +119,7 @@ router.post("/matching/run", requireAuth, async (req: AuthRequest, res) => {
 
 MATCHING RULES (follow strictly):
 1. Age bands: Core tier (Core + Homeschool Core, ages 6-12) ONLY match with each other. Minis tier (Minis + Homeschool Minis, ages 3-6) ONLY match with each other. Never cross bands.
-2. Age proximity: Ideal = within 1 year. Acceptable = within 2 years. NEVER more than 2 years apart.
+2. Age proximity: Ideal = within 1 year. Acceptable = within ${MAX_AGE_GAP_YEARS} years. NEVER more than ${MAX_AGE_GAP_YEARS} years apart. This is enforced in code — a suggestion breaking it is discarded, so do not propose one.
 3. Maximize shared interests — more overlap = better match.
 4. Geographic diversity is a soft preference — different states preferred but never required.
 5. NEVER match children who have been previously matched.
@@ -199,18 +202,40 @@ Rules for your response:
       });
     }
 
-    // Enrich suggestions with child data
-    const enrichedSuggestions = parsed.suggestions
+    // Enforce the pairing rules in code, not just in the prompt. A suggestion
+    // that breaks them never reaches the review screen, so nobody can approve it
+    // by accident. Rejections are logged rather than silently dropped — a run
+    // that produces many of them is telling us something about the prompt.
+    const rejected: Array<{ pair: string; reason: string }> = [];
+    const legalSuggestions = parsed.suggestions
       .filter((s) => childMap.has(s.child_a_id) && childMap.has(s.child_b_id))
-      .map((s) => ({
-        ...s,
-        child_a: childMap.get(s.child_a_id),
-        child_b: childMap.get(s.child_b_id),
-      }));
+      .filter((s) => {
+        const a = childMap.get(s.child_a_id) as Record<string, unknown>;
+        const b = childMap.get(s.child_b_id) as Record<string, unknown>;
+        const verdict = validateMatchPair(a, b);
+        if (!verdict.ok) {
+          rejected.push({ pair: `${s.child_a_id}|${s.child_b_id}`, reason: verdict.reason ?? "invalid" });
+        }
+        return verdict.ok;
+      });
+
+    if (rejected.length > 0) {
+      req.log?.warn(
+        { rejected, suggested: parsed.suggestions.length },
+        "Matching: AI suggestions rejected by the pairing rules",
+      );
+    }
+
+    // Enrich suggestions with child data
+    const enrichedSuggestions = legalSuggestions.map((s) => ({
+      ...s,
+      child_a: childMap.get(s.child_a_id),
+      child_b: childMap.get(s.child_b_id),
+    }));
 
     // Find children with no match
     const matchedIds = new Set<string>(
-      parsed.suggestions.flatMap((s) => [s.child_a_id, s.child_b_id])
+      legalSuggestions.flatMap((s) => [s.child_a_id, s.child_b_id])
     );
     const no_match_found = children
       .filter((c) => !matchedIds.has(c.id))

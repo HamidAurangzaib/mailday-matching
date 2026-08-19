@@ -11,6 +11,7 @@ import { computeSubscriptionMonth, computePriorityTier } from "../lib/subscripti
 import { declineAddressConsent } from "./lifecycle-jobs.js";
 import { matchingEnabled, MATCHING_DISABLED_MESSAGE } from "../lib/matching-flag.js";
 import { resumeGuaranteePause } from "../lib/guarantee-pause.js";
+import { validateMatchPair } from "../lib/match-rules.js";
 import { guaranteeStartDate } from "../lib/guarantee-clock.js";
 
 const router: IRouter = Router();
@@ -171,12 +172,12 @@ router.post("/matches", requireAuth, async (req: AuthRequest, res) => {
     const [aResult, bResult] = await Promise.all([
       supabase
         .from("children")
-        .select("id, child_first_name, date_of_birth, age, interests, billing_paused, created_date, parents(id, first_name, email, mailing_address, address_type)")
+        .select("id, child_first_name, date_of_birth, age, tier, interests, billing_paused, created_date, parents(id, first_name, email, mailing_address, address_type)")
         .eq("id", child_a_id)
         .single(),
       supabase
         .from("children")
-        .select("id, child_first_name, date_of_birth, age, interests, billing_paused, created_date, parents(id, first_name, email, mailing_address, address_type)")
+        .select("id, child_first_name, date_of_birth, age, tier, interests, billing_paused, created_date, parents(id, first_name, email, mailing_address, address_type)")
         .eq("id", child_b_id)
         .single(),
     ]);
@@ -191,6 +192,7 @@ router.post("/matches", requireAuth, async (req: AuthRequest, res) => {
       child_first_name: string;
       date_of_birth: string | null;
       age: number | null;
+      tier: string | null;
       interests: string[] | null;
       billing_paused: boolean | null;
       created_date: string | null;
@@ -207,6 +209,20 @@ router.post("/matches", requireAuth, async (req: AuthRequest, res) => {
 
     if (!childA.parents?.email || !childB.parents?.email) {
       res.status(400).json({ error: "Both children must have a parent with an email" });
+      return;
+    }
+
+    // The pairing rules, enforced. Until now they were only instructions in the
+    // matching prompt, so an unsuitable pair that slipped past the AI could be
+    // approved here with nothing to stop it. This is the backstop for the human
+    // review step, not a replacement for it.
+    const verdict = validateMatchPair(childA, childB);
+    if (!verdict.ok) {
+      req.log?.warn(
+        { childA: child_a_id, childB: child_b_id, reason: verdict.reason },
+        "Match creation blocked by the pairing rules",
+      );
+      res.status(400).json({ error: verdict.reason });
       return;
     }
 

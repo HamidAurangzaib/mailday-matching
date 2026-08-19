@@ -41,6 +41,11 @@ interface PreviewResult {
 
 // Friendly names for the 5 known templates.
 const FRIENDLY_NAMES: Record<string, { name: string; description: string }> = {
+  tier_upgraded_to_core: {
+    name: "Moving up to Core",
+    description:
+      "Sent when a child turns 7 and moves up from Minis to Core. Their pen pal doesn't change — only the pack does.",
+  },
   onboarding_nudge: {
     name: "Onboarding nudge",
     description: "Sent if a family paid but hasn't finished the onboarding form after 3 days.",

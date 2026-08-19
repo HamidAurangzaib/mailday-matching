@@ -21,7 +21,7 @@ import { requireAuth, requireAdmin, type AuthRequest } from "../middlewares/auth
 import { sendEmail } from "../lib/email.js";
 import { logAudit } from "../lib/audit.js";
 import { differenceInDays, parseISO } from "date-fns";
-import { tierChangeOnAging } from "../lib/age.js";
+import { computeAge } from "../lib/age.js";
 import { offboardFamily, requeueChild } from "../lib/lifecycle.js";
 import { createConfirmationToken } from "../lib/confirmation.js";
 import { addPauseReason } from "../lib/pause.js";
@@ -55,6 +55,10 @@ const GUARANTEE_BREACH_DAYS = 21;
 const ADDRESS_CONFIRM_CHASE_DAYS = 7;
 /** A Poppy card task open this many days = family treated as offboarded. */
 const WINBACK_FAIL_AFTER_DAYS = 60;
+/** Age at which a Minis child is moved up to Core. Deliberately 7, not 6:
+ *  plenty of 6-year-olds still draw more than they write, and their parent
+ *  chose Minis knowing their age. */
+const TIER_UPGRADE_AGE = 7;
 /** A6: a Give-a-Key family with still no address after this many days gets a
  *  follow-up task. A nudge only — never a cancellation. */
 const GAK_ADDRESS_OVERDUE_DAYS = 30;
@@ -1166,39 +1170,46 @@ export async function runFinaliseCancellations(): Promise<FinaliseCancellationsR
   return result;
 }
 
-// ─── Block 3.5 + 3.6: age-band review (formerly the aging-out cron) ─────────
+// ─── Tier upgrade: Minis -> Core at 7 ───────────────────────────────────────
 
 export interface AgingResult {
   scanned: number;
-  /** Children whose age band no longer matches their purchased tier. */
-  mismatched: number;
+  upgraded: number;
+  emailsSent: number;
   tasksCreated: number;
   errors: string[];
   ranAt: string;
 }
 
 /**
- * Daily age-band check.
+ * Move a child from Minis up to Core once they turn TIER_UPGRADE_AGE.
  *
- * This used to REWRITE a child's tier from their date of birth. That quietly
- * contradicted the rule Phase 8 established — a child's tier comes from the
- * membership purchased for them, not from their birthday — and it had a real
- * cost: a parent who deliberately put a 5-year-old who already writes on Core
- * would find them silently moved to Minis overnight, then receive the wrong
- * pack. It also worked in reverse, dragging a deliberately-Minis 7-year-old up
- * to Core. Both were observed in production on 2026-08-18.
+ * History worth knowing: this job used to recompute every child's tier from
+ * their date of birth and write it, in BOTH directions, at age 6 and without
+ * telling anyone. That silently overrode deliberate parental choices — a
+ * 5-year-old who already writes, deliberately placed on Core, would be demoted
+ * to Minis overnight and sent the wrong pack. It fired twice in production on
+ * 2026-08-18 before being caught.
  *
- * Moving a child between bands is also a BILLING change — Core and Minis are
- * different memberships — so it was never something a cron should decide alone.
+ * The rules now (Courtney, 2026-08-19):
+ *   • Upward only. A child is never moved down; if a parent chose Minis for a
+ *     7-year-old or Core for a 5-year-old, that choice stands.
+ *   • At 7, not 6. Plenty of 6-year-olds are still drawing more than writing,
+ *     and their parent chose Minis knowing their age.
+ *   • The parent is told. The email is a normal template, editable in the app.
+ *   • The pen pal never changes. The pair simply receive different packs from
+ *     that point, which is accepted.
+ *   • Billing is NOT touched. Core may cost more than Minis, and software should
+ *     not quietly change what a family pays — so it raises a task instead.
  *
- * So the cron now reports instead of acting: when a child's age band no longer
- * matches their tier, it raises a review task and leaves the tier exactly as the
- * parent bought it. A human decides whether to upgrade the membership.
+ * Naturally idempotent: once the child is on Core they no longer match the
+ * filter, so a second run finds nothing.
  */
 export async function runAgingOutCron(): Promise<AgingResult> {
   const result: AgingResult = {
     scanned: 0,
-    mismatched: 0,
+    upgraded: 0,
+    emailsSent: 0,
     tasksCreated: 0,
     errors: [],
     ranAt: new Date().toISOString(),
@@ -1206,75 +1217,90 @@ export async function runAgingOutCron(): Promise<AgingResult> {
 
   const { data: children, error } = await supabase
     .from("children")
-    .select("id, child_first_name, date_of_birth, tier, parent_id, match_status")
+    .select("id, child_first_name, date_of_birth, tier, parent_id, parents(first_name, email)")
     .not("date_of_birth", "is", null)
-    .in("match_status", ["Unmatched", "Rematch Requested", "Matched"]);
+    .like("tier", "%Minis%");
 
   if (error) {
     result.errors.push(`Failed to load children: ${error.message}`);
     return result;
   }
   if (!children || children.length === 0) {
-    logger.info(result, "Age-band cron: no children with DOB");
+    logger.info(result, "Tier-upgrade cron: no Minis children");
     return result;
   }
 
   result.scanned = children.length;
 
-  // Idempotency: one open review per child, so a family isn't re-flagged nightly.
-  const childIds = children.map((c) => c.id);
-  const { data: existingTasks } = await supabase
-    .from("lifecycle_tasks")
-    .select("child_id")
-    .eq("type", "review_tier_mismatch")
-    .eq("completed", false)
-    .in("child_id", childIds);
-  const alreadyFlagged = new Set((existingTasks ?? []).map((t) => t.child_id));
-
   for (const c of children) {
     try {
-      const change = tierChangeOnAging(c.date_of_birth as string, c.tier as string);
-      if (!change) continue;
+      const age = computeAge(c.date_of_birth as string);
+      if (age === null || age < TIER_UPGRADE_AGE) continue;
 
-      result.mismatched++;
-      if (alreadyFlagged.has(c.id)) continue;
+      const from = c.tier as string;
+      const to = from.startsWith("Homeschool") ? "Homeschool Core" : "Core";
 
-      const direction =
-        change.to.includes("Minis")
-          ? `is younger than their ${change.from} membership usually serves`
-          : `has grown beyond their ${change.from} membership`;
+      const { error: updErr } = await supabase
+        .from("children")
+        .update({ tier: to })
+        .eq("id", c.id)
+        // Guard against two runs racing: only move a child still on Minis.
+        .like("tier", "%Minis%");
+      if (updErr) {
+        result.errors.push(`tier update failed for child ${c.id}: ${updErr.message}`);
+        continue;
+      }
+      result.upgraded++;
 
+      await logAudit({
+        action: "child.tier_upgraded",
+        entityType: "child",
+        entityId: c.id as string,
+        payloadBefore: { tier: from },
+        payloadAfter: { tier: to },
+        metadata: { source: "tier_upgrade_cron", age, child_first_name: c.child_first_name },
+      });
+
+      const parent = (c as Record<string, unknown>)["parents"] as
+        | { first_name?: string; email?: string }
+        | null;
+
+      // Tell the parent. Their child's pack is about to look different, and
+      // finding that out by opening the box is not the experience we want.
+      if (parent?.email) {
+        const sent = await sendEmail({
+          to: parent.email,
+          templateKey: "tier_upgraded_to_core",
+          vars: {
+            parent_first_name: parent.first_name ?? "",
+            child_first_name: (c.child_first_name as string) ?? "your child",
+            age: String(age),
+            new_tier: to,
+          },
+        });
+        if (sent.ok) result.emailsSent++;
+        else result.errors.push(`upgrade email failed for ${parent.email}: ${sent.error ?? sent.status}`);
+      }
+
+      // Billing stays a human decision.
       const { error: taskErr } = await supabase.from("lifecycle_tasks").insert({
-        type: "review_tier_mismatch",
-        title: `Check membership — ${c.child_first_name} (${change.from})`,
+        type: "tier_upgrade_billing",
+        title: `Billing — ${c.child_first_name} moved from ${from} to ${to}`,
         description:
-          `${c.child_first_name} ${direction}, so by age alone they would sit in ${change.to}. ` +
-          "Their tier has NOT been changed — the membership their parent bought is the one that counts, " +
-          "and switching bands is a billing change. Decide whether to offer the family an upgrade, " +
-          "or close this if the parent chose deliberately.",
+          `${c.child_first_name} turned ${age} and has been moved up to ${to}. They keep their pen pal ` +
+          "and their parent has been emailed. Their membership has NOT been changed — check whether " +
+          `${to} is priced differently from ${from} and update their subscription if so.`,
         parent_id: c.parent_id,
         child_id: c.id,
       });
-
-      if (taskErr) {
-        result.errors.push(`task create failed for child ${c.id}: ${taskErr.message}`);
-      } else {
-        result.tasksCreated++;
-        await logAudit({
-          action: "child.age_band_review_raised",
-          entityType: "child",
-          entityId: c.id as string,
-          payloadBefore: { tier: change.from },
-          payloadAfter: { tier: change.from, age_band_suggests: change.to },
-          metadata: { source: "age_band_cron", child_first_name: c.child_first_name },
-        });
-      }
+      if (taskErr) result.errors.push(`billing task failed for child ${c.id}: ${taskErr.message}`);
+      else result.tasksCreated++;
     } catch (err) {
       result.errors.push(`child ${c.id}: ${String(err)}`);
     }
   }
 
-  logger.info(result, "Age-band cron completed");
+  logger.info(result, "Tier-upgrade cron completed");
   return result;
 }
 
