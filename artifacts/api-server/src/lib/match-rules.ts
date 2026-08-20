@@ -17,8 +17,13 @@
  */
 import { computeAge } from "./age.js";
 
-/** Never pair children more than this many years apart. */
+/** Never pair children 7-and-over more than this many years apart. */
 export const MAX_AGE_GAP_YEARS = 2;
+/** Below this age the cap tightens — a 4-year-old and a 6-year-old are at wildly
+ *  different writing stages even though they're "only" two years apart. */
+export const YOUNG_TIGHTER_UNDER = 7;
+/** Maximum gap when the younger of the two children is under YOUNG_TIGHTER_UNDER. */
+export const MAX_AGE_GAP_YEARS_YOUNG = 1;
 
 function parseDob(v: string | null | undefined): Date | null {
   if (!v) return null;
@@ -91,41 +96,50 @@ export function validateMatchPair(a: PairCandidate, b: PairCandidate): PairVerdi
     };
   }
 
+  // How far apart these two may be depends on how young they are. For 7-and-over
+  // a two-year gap barely shows in a letter. At the bottom it's a chasm: a
+  // 4-year-old scribbles while a parent writes, a 6-year-old writes words
+  // themselves — pair them and one family does all the work. So if the younger
+  // of the two is under 7, we allow only one year. (If one child is under 7 and
+  // the other over, the younger being under 7 makes this the tighter rule.)
+  const ageA = effectiveAge(a);
+  const ageB = effectiveAge(b);
+  if (ageA === null || ageB === null) {
+    return { ok: false, reason: `Cannot check ages — ${ageA === null ? nameA : nameB} has no date of birth.` };
+  }
+  const maxGapYears =
+    Math.min(ageA, ageB) < YOUNG_TIGHTER_UNDER ? MAX_AGE_GAP_YEARS_YOUNG : MAX_AGE_GAP_YEARS;
+  const unit = maxGapYears === 1 ? "year" : "years";
+
   // Measure from the actual birthdays where we have them. Comparing whole-year
   // ages hides up to a year of difference at each end: a child of 5y11m and one
-  // of 3y0m both round to "5 and 3", a gap of 2, while really being nearly three
+  // of 4y0m both round to "5 and 4", a gap of 1, while really being nearly two
   // years apart. That is precisely the pairing this rule exists to prevent.
   const dobA = parseDob(a.date_of_birth);
   const dobB = parseDob(b.date_of_birth);
 
   if (dobA && dobB) {
     const gapMonths = monthsBetween(dobA, dobB);
-    if (gapMonths > MAX_AGE_GAP_YEARS * 12) {
+    if (gapMonths > maxGapYears * 12) {
       return {
         ok: false,
         reason:
           `${nameA} and ${nameB} are ${(gapMonths / 12).toFixed(1)} years apart. ` +
-          `The maximum is ${MAX_AGE_GAP_YEARS}.`,
+          `The maximum for their ages is ${maxGapYears} ${unit}.`,
       };
     }
     return { ok: true };
   }
 
-  // No date of birth on one side — fall back to whole-year ages, which is the
-  // best we can do, and refuse outright if even that is missing.
-  const ageA = effectiveAge(a);
-  const ageB = effectiveAge(b);
-  if (ageA === null || ageB === null) {
-    return { ok: false, reason: `Cannot check ages — ${ageA === null ? nameA : nameB} has no date of birth.` };
-  }
-
+  // No date of birth on one side — fall back to whole-year ages, the best we can
+  // do (and we already refused above if even that was missing).
   const gap = Math.abs(ageA - ageB);
-  if (gap > MAX_AGE_GAP_YEARS) {
+  if (gap > maxGapYears) {
     return {
       ok: false,
       reason:
         `${nameA} (${ageA}) and ${nameB} (${ageB}) are ${gap} years apart. ` +
-        `The maximum is ${MAX_AGE_GAP_YEARS}.`,
+        `The maximum for their ages is ${maxGapYears} ${unit}.`,
     };
   }
 

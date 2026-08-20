@@ -4,7 +4,7 @@ import { supabase } from "../lib/supabase.js";
 import { requireAuth, type AuthRequest } from "../middlewares/auth.js";
 import { differenceInDays, parseISO } from "date-fns";
 import { computeSubscriptionMonth } from "../lib/subscription.js";
-import { validateMatchPair, effectiveAge, MAX_AGE_GAP_YEARS } from "../lib/match-rules.js";
+import { validateMatchPair, effectiveAge, MAX_AGE_GAP_YEARS, MAX_AGE_GAP_YEARS_YOUNG } from "../lib/match-rules.js";
 
 const router: IRouter = Router();
 
@@ -118,8 +118,8 @@ router.post("/matching/run", requireAuth, async (req: AuthRequest, res) => {
     const prompt = `You are a pen pal matching specialist for a children's membership program called MailDay. Your job is to suggest the best possible pen pal matches from the unmatched children below.
 
 MATCHING RULES (follow strictly):
-1. Age bands: Core tier (Core + Homeschool Core, ages 6-12) ONLY match with each other. Minis tier (Minis + Homeschool Minis, ages 3-6) ONLY match with each other. Never cross bands.
-2. Age proximity: Ideal = within 1 year. Acceptable = within ${MAX_AGE_GAP_YEARS} years. NEVER more than ${MAX_AGE_GAP_YEARS} years apart. This is enforced in code — a suggestion breaking it is discarded, so do not propose one.
+1. Age bands: Core tier (Core + Homeschool Core, ages 7-12) ONLY match with each other. Minis tier (Minis + Homeschool Minis, ages 4-6) ONLY match with each other. Never cross bands.
+2. Age proximity: the maximum gap depends on age. If BOTH children are 7 or older, never more than ${MAX_AGE_GAP_YEARS} years apart. If EITHER child is under 7, never more than ${MAX_AGE_GAP_YEARS_YOUNG} year apart (younger children are at very different writing stages). Closer is always better. This is enforced in code — a suggestion breaking it is discarded, so do not propose one.
 3. Maximize shared interests — more overlap = better match.
 4. Geographic diversity is a soft preference — different states preferred but never required.
 5. NEVER match children who have been previously matched.

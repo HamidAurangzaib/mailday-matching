@@ -1,6 +1,6 @@
 /* Unit tests for the pairing rules. Pure, no I/O.
    Run: esbuild-bundle this file and execute with node (see scratchpad runner). */
-import { validateMatchPair, MAX_AGE_GAP_YEARS } from "./match-rules.js";
+import { validateMatchPair, MAX_AGE_GAP_YEARS, MAX_AGE_GAP_YEARS_YOUNG } from "./match-rules.js";
 
 let pass = 0, fail = 0;
 function check(label: string, got: boolean, want: boolean, reason?: string) {
@@ -24,15 +24,28 @@ const kid = (name: string, dob: string, tier: string) => ({ child_first_name: na
   check("5 vs 11 on Core is rejected", r.ok, false, r.reason);
 }
 
-// ── The gap boundary ────────────────────────────────────────────────────────
-check("exactly 2 years apart is allowed",
-  validateMatchPair(kid("A", "2018-06-01", "Core"), kid("B", "2020-06-01", "Core")).ok, true);
-check("2 years and a month apart is rejected",
-  validateMatchPair(kid("A", "2018-05-01", "Core"), kid("B", "2020-06-01", "Core")).ok, false);
+// ── The gap boundary, both children 7+ (two-year cap) ───────────────────────
+check("exactly 2 years apart (both 7+) is allowed",
+  validateMatchPair(kid("A", "2016-06-01", "Core"), kid("B", "2018-06-01", "Core")).ok, true);
+check("2 years and a month apart (both 7+) is rejected",
+  validateMatchPair(kid("A", "2016-05-01", "Core"), kid("B", "2018-06-01", "Core")).ok, false);
 check("same birthday is allowed",
-  validateMatchPair(kid("A", "2018-06-01", "Core"), kid("B", "2018-06-01", "Core")).ok, true);
+  validateMatchPair(kid("A", "2016-06-01", "Core"), kid("B", "2016-06-01", "Core")).ok, true);
 check("order does not matter",
-  validateMatchPair(kid("B", "2020-06-01", "Core"), kid("A", "2018-05-01", "Core")).ok, false);
+  validateMatchPair(kid("B", "2018-06-01", "Core"), kid("A", "2016-05-01", "Core")).ok, false);
+
+// ── The tighter cap for under-7s (one-year gap) ─────────────────────────────
+// Courtney's ask: under 7, a two-year gap is a chasm (a 4-year-old scribbles, a
+// 6-year-old writes words), so the cap tightens to one year.
+check("4yo and 6yo two years apart (Minis) is REJECTED",
+  validateMatchPair(kid("A", "2022-06-01", "Minis"), kid("B", "2020-06-01", "Minis")).ok, false);
+check("5yo and 6yo one year apart (Minis) is allowed",
+  validateMatchPair(kid("A", "2021-06-01", "Minis"), kid("B", "2020-06-01", "Minis")).ok, true);
+check("4yo and 5.5yo (1.5 years, both under 7) is rejected",
+  validateMatchPair(kid("A", "2022-06-01", "Minis"), kid("B", "2020-12-01", "Minis")).ok, false);
+check("younger child under 7 pulls the pair to the 1-year cap (fallback ages)",
+  validateMatchPair({ child_first_name: "A", tier: "Core", age: 6 },
+                    { child_first_name: "B", tier: "Core", age: 8 }).ok, false);
 
 // ── Tier bands ──────────────────────────────────────────────────────────────
 check("Minis and Core never pair, however close in age",
@@ -60,5 +73,5 @@ check("falls back to ages when one DOB is missing (out of range)",
   validateMatchPair({ child_first_name: "A", tier: "Core", age: 12 },
                     kid("B", "2019-06-01", "Core")).ok, false);
 
-console.log(`\nmatch-rules: ${pass} passed, ${fail} failed (max gap ${MAX_AGE_GAP_YEARS}y)`);
+console.log(`\nmatch-rules: ${pass} passed, ${fail} failed (gap ${MAX_AGE_GAP_YEARS}y for 7+, ${MAX_AGE_GAP_YEARS_YOUNG}y under 7)`);
 if (fail > 0) process.exit(1);
