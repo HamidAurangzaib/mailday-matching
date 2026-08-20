@@ -59,7 +59,7 @@ async function loadParentByToken(token: string) {
 // waiting for a PO Box to exist.
 const ONBOARDING_ADDRESS_TYPES = ["Home", "Work", "PO Box", "Military (APO/FPO/DPO)", GAK_ADDRESS_TYPE];
 
-/** A tier is a "Minis" tier if it serves ages 3–5. */
+/** A tier is a "Minis" tier if it serves ages 4–6. */
 function isMinisTier(tier: string): boolean {
   return tier.endsWith("Minis");
 }
@@ -73,7 +73,7 @@ function pickBestSlot(
   slots: Array<{ id: string; tier: string }>,
   age: number,
 ): { id: string; tier: string } | undefined {
-  const wantMinis = age <= 5;
+  const wantMinis = age <= 6;
   return slots.find((s) => isMinisTier(s.tier) === wantMinis) ?? slots[0];
 }
 
@@ -277,8 +277,8 @@ router.post("/onboarding/:token/child", async (req, res) => {
     }
 
     const childAge = computeAge(body.date_of_birth);
-    if (childAge === null || childAge < 1 || childAge > 18) {
-      res.status(400).json({ error: "Child must be between 1 and 18 years old" });
+    if (childAge === null || childAge < 4 || childAge > 12) {
+      res.status(400).json({ error: "MailDay is for children ages 4 to 12. Please check the date of birth." });
       return;
     }
 

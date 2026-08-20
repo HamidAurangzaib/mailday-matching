@@ -86,7 +86,7 @@ export default function GiveAKeyApply() {
   };
 
   const ageNum = parseInt(childAge, 10);
-  const ageValid = ageNum >= 3 && ageNum <= 12;
+  const ageValid = ageNum >= 4 && ageNum <= 12;
   const emailValid = email.trim().includes("@") && email.trim().includes(".");
   const canSubmit =
     firstName.trim() && lastName.trim() && emailValid &&
@@ -289,14 +289,14 @@ export default function GiveAKeyApply() {
             <div className="space-y-1.5">
               <Label className="text-sm font-semibold">Age <span className="text-[#DD4B39]">*</span></Label>
               <Input
-                type="number" min={3} max={12}
+                type="number" min={4} max={12}
                 value={childAge}
                 onChange={(e) => setChildAge(e.target.value)}
-                placeholder="3–12"
+                placeholder="4–12"
                 className="h-11 border-[#E8D5C4] focus-visible:ring-[#4AADDE]/40"
               />
               {childAge && !ageValid && (
-                <p className="text-xs text-red-500">Age must be between 3 and 12</p>
+                <p className="text-xs text-red-500">Age must be between 4 and 12</p>
               )}
             </div>
           </div>

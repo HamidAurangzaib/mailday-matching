@@ -141,8 +141,8 @@ export default function Queue() {
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="grid w-full max-w-md grid-cols-2">
-          <TabsTrigger value="core">Core (6-12) ({core.length})</TabsTrigger>
-          <TabsTrigger value="minis">Minis (3-6) ({minis.length})</TabsTrigger>
+          <TabsTrigger value="core">Core (7-12) ({core.length})</TabsTrigger>
+          <TabsTrigger value="minis">Minis (4-6) ({minis.length})</TabsTrigger>
         </TabsList>
         <TabsContent value="core" className="mt-6">
           <ChildGrid children={core} onOpen={openChild} healthFilter={healthFilter} />

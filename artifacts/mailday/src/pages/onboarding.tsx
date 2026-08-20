@@ -22,14 +22,15 @@ const INTERESTS = [
 ];
 
 const TIERS = [
-  { value: "Core", label: "Core", age: "Ages 6–12" },
-  { value: "Minis", label: "Minis", age: "Ages 3–5" },
-  { value: "Homeschool Core", label: "Homeschool Core", age: "Ages 6–12" },
-  { value: "Homeschool Minis", label: "Homeschool Minis", age: "Ages 3–5" },
+  { value: "Core", label: "Core", age: "Ages 7–12" },
+  { value: "Minis", label: "Minis", age: "Ages 4–6" },
+  { value: "Homeschool Core", label: "Homeschool Core", age: "Ages 7–12" },
+  { value: "Homeschool Minis", label: "Homeschool Minis", age: "Ages 4–6" },
 ];
 
-const DOB_MIN = new Date(new Date().getFullYear() - 18, 0, 1).toISOString().split("T")[0];
-const DOB_MAX = new Date(new Date().getFullYear() - 1, 11, 31).toISOString().split("T")[0];
+// MailDay is for ages 4–12. The picker brackets that range; calcAge enforces it exactly.
+const DOB_MIN = new Date(new Date().getFullYear() - 13, 0, 1).toISOString().split("T")[0];
+const DOB_MAX = new Date(new Date().getFullYear() - 4, 11, 31).toISOString().split("T")[0];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -81,7 +82,7 @@ function calcAge(dob: string): number | null {
   let age = today.getFullYear() - birth.getFullYear();
   const m = today.getMonth() - birth.getMonth();
   if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
-  return age >= 1 && age <= 18 ? age : null;
+  return age >= 4 && age <= 12 ? age : null;
 }
 
 // Address step (A4) — required address type + the exact sharing-consent wording.
@@ -126,11 +127,11 @@ function tiersAvailableFor(
   return [...new Set(pool)];
 }
 
-/** Age-based suggestion, limited to what's actually available (3–5 → Minis). */
+/** Age-based suggestion, limited to what's actually available (4–6 → Minis). */
 function bestTierForAge(available: string[], age: number | null): string | undefined {
   if (available.length === 0) return undefined;
   if (age === null) return available[0];
-  const wantMinis = age <= 5;
+  const wantMinis = age <= 6;
   return available.find((t) => t.endsWith("Minis") === wantMinis) ?? available[0];
 }
 
@@ -258,7 +259,7 @@ function ChildSection({
               <p className="text-xs text-gray-500">
                 {age !== null
                   ? `${age} years old`
-                  : "Please enter a valid birth date (age 1–18)."}
+                  : "MailDay is for children ages 4–12 — please check the birth date."}
               </p>
             )}
           </div>

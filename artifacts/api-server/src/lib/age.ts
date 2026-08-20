@@ -4,11 +4,12 @@
  * ages out of Minis. Old code that reads `children.age` should be migrated
  * to call computeAge(child.date_of_birth) instead.
  *
- * Age bands per the existing schema:
- *   Minis            → 3–5
- *   Core             → 6–12
- *   Homeschool Minis → 3–5  (homeschool variant)
- *   Homeschool Core  → 6–12 (homeschool variant)
+ * Age bands (Courtney, 2026-08: minimum age raised 3→4; Minis tops out at 6,
+ * children move up to Core at 7 — see TIER_UPGRADE_AGE in lifecycle-jobs):
+ *   Minis            → 4–6
+ *   Core             → 7–12
+ *   Homeschool Minis → 4–6  (homeschool variant)
+ *   Homeschool Core  → 7–12 (homeschool variant)
  */
 
 export type Tier = "Minis" | "Core" | "Homeschool Minis" | "Homeschool Core";
@@ -33,12 +34,12 @@ export function computeAge(dob: string | Date | null | undefined, asOf: Date = n
 /**
  * Decide the correct tier for a child given their current age and the
  * homeschool-ness of their existing tier. Returns null if the age is outside
- * the supported 3–12 band.
+ * the supported 4–12 band.
  */
 export function computeTier(age: number | null, currentTier: Tier | string | null | undefined): Tier | null {
-  if (age == null || age < 3 || age > 12) return null;
+  if (age == null || age < 4 || age > 12) return null;
   const isHomeschool = typeof currentTier === "string" && currentTier.startsWith("Homeschool");
-  if (age <= 5) return isHomeschool ? "Homeschool Minis" : "Minis";
+  if (age <= 6) return isHomeschool ? "Homeschool Minis" : "Minis";
   return isHomeschool ? "Homeschool Core" : "Core";
 }
 

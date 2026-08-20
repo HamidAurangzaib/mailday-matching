@@ -95,8 +95,8 @@ router.post("/give-a-key/apply", async (req, res) => {
       res.status(400).json({ error: "Child name and age are required" });
       return;
     }
-    if (body.child_age < 3 || body.child_age > 12) {
-      res.status(400).json({ error: "Child age must be between 3 and 12" });
+    if (body.child_age < 4 || body.child_age > 12) {
+      res.status(400).json({ error: "Child age must be between 4 and 12" });
       return;
     }
     if (!body.statement_of_need?.trim()) {
