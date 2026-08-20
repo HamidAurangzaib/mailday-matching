@@ -73,7 +73,10 @@ function pickBestSlot(
   slots: Array<{ id: string; tier: string }>,
   age: number,
 ): { id: string; tier: string } | undefined {
-  const wantMinis = age <= 6;
+  // Default suggestion only (the parent can pick the other tier and it sticks).
+  // Age 6 defaults to Core; 4–5 default to Minis. If the family only bought the
+  // other tier's slot, we still hand them what they purchased (slots[0]).
+  const wantMinis = age <= 5;
   return slots.find((s) => isMinisTier(s.tier) === wantMinis) ?? slots[0];
 }
 

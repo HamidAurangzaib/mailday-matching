@@ -22,9 +22,9 @@ const INTERESTS = [
 ];
 
 const TIERS = [
-  { value: "Core", label: "Core", age: "Ages 7–12" },
+  { value: "Core", label: "Core", age: "Ages 6–12" },
   { value: "Minis", label: "Minis", age: "Ages 4–6" },
-  { value: "Homeschool Core", label: "Homeschool Core", age: "Ages 7–12" },
+  { value: "Homeschool Core", label: "Homeschool Core", age: "Ages 6–12" },
   { value: "Homeschool Minis", label: "Homeschool Minis", age: "Ages 4–6" },
 ];
 
@@ -127,11 +127,11 @@ function tiersAvailableFor(
   return [...new Set(pool)];
 }
 
-/** Age-based suggestion, limited to what's actually available (4–6 → Minis). */
+/** Default suggestion by age (parent can override): 4–5 → Minis, 6+ → Core. */
 function bestTierForAge(available: string[], age: number | null): string | undefined {
   if (available.length === 0) return undefined;
   if (age === null) return available[0];
-  const wantMinis = age <= 6;
+  const wantMinis = age <= 5;
   return available.find((t) => t.endsWith("Minis") === wantMinis) ?? available[0];
 }
 
