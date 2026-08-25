@@ -216,13 +216,19 @@ router.post("/webhooks/shopify/orders", async (req: RawRequest, res) => {
   try {
     const order = req.body as {
       id?: number;
+      // Shopify carries the buyer's email at the TOP level (order.email) on many
+      // orders — notably subscription / ReCharge-created ones, where `customer`
+      // can be thin or absent. Reading only customer.email is what made the
+      // welcome trigger fire on roughly one order in four; fall back to order.email.
+      email?: string;
       customer?: { id?: number; email?: string; first_name?: string; last_name?: string; phone?: string };
       billing_address?: { province_code?: string; address1?: string; address2?: string; city?: string; zip?: string };
       line_items?: Array<{ title?: string; name?: string; variant_title?: string; quantity?: number }>;
     };
 
     const customer = order.customer;
-    if (!customer?.email) {
+    const customerEmail = (customer?.email ?? order.email)?.toLowerCase().trim();
+    if (!customerEmail) {
       res.status(200).json({ received: true, skipped: "no customer email" });
       return;
     }
@@ -242,12 +248,12 @@ router.post("/webhooks/shopify/orders", async (req: RawRequest, res) => {
     const { data: existing } = await supabase
       .from("parents")
       .select("id, onboarding_token, join_date")
-      .eq("email", customer.email.toLowerCase())
+      .eq("email", customerEmail)
       .single();
 
     if (existing) {
       await supabase.from("parents").update({
-        shopify_customer_id: customer.id?.toString(),
+        shopify_customer_id: customer?.id?.toString(),
         membership_tier: tier,
         billing_type,
         subscription_status: "Active",
@@ -270,9 +276,9 @@ router.post("/webhooks/shopify/orders", async (req: RawRequest, res) => {
       void emitKlaviyoEvent({
         event: "family_subscribed",
         profile: {
-          email: customer.email.toLowerCase(),
-          first_name: customer.first_name ?? undefined,
-          last_name: customer.last_name ?? undefined,
+          email: customerEmail,
+          first_name: customer?.first_name ?? undefined,
+          last_name: customer?.last_name ?? undefined,
         },
         properties: {
           tier,
@@ -293,17 +299,17 @@ router.post("/webhooks/shopify/orders", async (req: RawRequest, res) => {
     const { data: parent, error } = await supabase
       .from("parents")
       .insert({
-        email: customer.email.toLowerCase(),
-        first_name: customer.first_name || "",
-        last_name: customer.last_name || "",
-        phone: customer.phone,
+        email: customerEmail,
+        first_name: customer?.first_name || "",
+        last_name: customer?.last_name || "",
+        phone: customer?.phone,
         state: ba?.province_code,
         mailing_address,
         membership_tier: tier,
         billing_type,
         subscription_status: "Active",
         join_date: joinDate,
-        shopify_customer_id: customer.id?.toString(),
+        shopify_customer_id: customer?.id?.toString(),
         onboarding_token,
       })
       .select("id, onboarding_token")
@@ -325,9 +331,9 @@ router.post("/webhooks/shopify/orders", async (req: RawRequest, res) => {
     void emitKlaviyoEvent({
       event: "family_subscribed",
       profile: {
-        email: customer.email.toLowerCase(),
-        first_name: customer.first_name ?? undefined,
-        last_name: customer.last_name ?? undefined,
+        email: customerEmail,
+        first_name: customer?.first_name ?? undefined,
+        last_name: customer?.last_name ?? undefined,
       },
       properties: {
         tier,
