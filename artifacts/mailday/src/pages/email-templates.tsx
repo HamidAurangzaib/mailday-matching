@@ -55,8 +55,12 @@ const FRIENDLY_NAMES: Record<string, { name: string; description: string }> = {
     description: "Sent the moment a match is approved. Contains the one-click address-confirm link.",
   },
   guarantee_breach: {
-    name: "Guarantee breach apology",
-    description: "Sent when a child crosses the 21-day match guarantee and billing auto-pauses.",
+    name: "Guarantee breach — billing paused",
+    description: "Sent at the 21-day guarantee WHEN billing was actually paused in ReCharge (says 'I've paused your billing').",
+  },
+  guarantee_breach_pending: {
+    name: "Guarantee breach — pause pending",
+    description: "Sent at the 21-day guarantee when the ReCharge pause hasn't applied yet — reassures the family without claiming billing is already paused.",
   },
   address_change_confirm: {
     name: "Address change confirmation",

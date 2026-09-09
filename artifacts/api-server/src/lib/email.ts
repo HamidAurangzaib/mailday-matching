@@ -26,7 +26,8 @@ export interface EmailTemplate {
 export type TemplateKey =
   | "onboarding_nudge"
   | "match_notification"
-  | "guarantee_breach"
+  | "guarantee_breach"          // day-21 breach WHEN billing was actually paused
+  | "guarantee_breach_pending"  // day-21 breach when the ReCharge pause hasn't applied yet (no false "paused" claim)
   // "pause_offer" removed 2026-07-20 — pauses are now offered manually, because
   // the app cannot pause ReCharge billing (see webhooks.ts cancellation block).
   | "address_change_confirm"

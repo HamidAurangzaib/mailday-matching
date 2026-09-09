@@ -385,10 +385,15 @@ export async function runGuaranteeBreachJob(): Promise<GuaranteeBreachResult> {
         }
       }
 
-      // 4b. Send R3 (guarantee_breach template).
+      // 4b. Reassure the family — but only tell them "I've paused your billing"
+      // when we actually did. If the ReCharge pause did NOT truly apply (dry-run,
+      // no single linked subscription, or a failure), send the variant that
+      // promises we're handling their billing WITHOUT stating a pause that hasn't
+      // happened — so a family is never told they're paused while ReCharge is
+      // still charging them. The human ReCharge task (4c) covers the real pause.
       const sendResult = await sendEmail({
         to: parent.email as string,
-        templateKey: "guarantee_breach",
+        templateKey: autoPause === "applied" ? "guarantee_breach" : "guarantee_breach_pending",
         vars: {
           child_first_name: child.child_first_name ?? "your child",
           parent_first_name: parent.first_name ?? "",

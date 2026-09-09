@@ -183,6 +183,11 @@ const SAMPLE_VARS: Record<string, Record<string, string>> = {
     child_first_name: "Sam",
     days_waiting: "22",
   },
+  guarantee_breach_pending: {
+    parent_first_name: "Jane",
+    child_first_name: "Sam",
+    days_waiting: "22",
+  },
   // `pause_offer` removed 2026-07-20 — the app can't pause ReCharge billing, so
   // pauses are offered manually by the team instead of by automated email.
   address_change_confirm: {
