@@ -9,7 +9,47 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const parents = [
+// Explicit seed-row shapes. Without these, TypeScript infers a conflicting union
+// from the mixed literals (some rows have internal_notes: null, some a string;
+// only some children carry homeschool_tier/approach), which the typed .insert()
+// then rejects — failing `pnpm run build` even though this is dev-only tooling.
+interface SeedParent {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  state: string;
+  mailing_address: string;
+  membership_tier: string;
+  billing_type: string;
+  subscription_status: string;
+  join_date: string;
+  referral_source: string;
+  community_status: string | null;
+  give_a_key_recipient: boolean;
+  at_risk: boolean;
+  internal_notes: string | null;
+}
+
+interface SeedChild {
+  parent_id: string;
+  child_first_name: string;
+  age: number;
+  tier: string;
+  interests: string[];
+  homeschool_edition: boolean;
+  homeschool_tier?: string;
+  homeschool_approach?: string;
+  match_status: string;
+  rematch_count: number;
+  match_guarantee_start_date: string;
+  billing_paused: boolean;
+  safety_flag: boolean;
+  internal_notes: string | null;
+  created_date: string;
+}
+
+const parents: SeedParent[] = [
   {
     first_name: "Sarah",
     last_name: "Mitchell",
@@ -80,7 +120,7 @@ const parents = [
   },
 ];
 
-const buildChildren = (parentMap: Record<string, string>) => [
+const buildChildren = (parentMap: Record<string, string>): SeedChild[] => [
   {
     parent_id: parentMap["sarah.mitchell@example.com"],
     child_first_name: "Lily",
