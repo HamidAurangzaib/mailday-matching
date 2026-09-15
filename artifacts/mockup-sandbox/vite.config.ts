@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig, type ConfigEnv, type UserConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
@@ -9,7 +9,7 @@ import { mockupPreviewPlugin } from "./mockupPreviewPlugin";
 // build. Requiring them unconditionally made `vite build` (and therefore
 // `pnpm run build`, which the Replit deploy runs) fail whenever they weren't
 // set. Enforce them only when actually serving; a build falls back to defaults.
-export default defineConfig(async ({ command }) => {
+export default defineConfig(async ({ command }: ConfigEnv): Promise<UserConfig> => {
   const isServe = command === "serve";
   const rawPort = process.env.PORT;
 
