@@ -247,11 +247,17 @@ router.post("/webhooks/shopify/orders", async (req: RawRequest, res) => {
 
     const { data: existing } = await supabase
       .from("parents")
-      .select("id, onboarding_token, join_date")
+      .select("id, onboarding_token, join_date, subscription_status")
       .eq("email", customerEmail)
       .single();
 
     if (existing) {
+      // ReCharge creates a FRESH Shopify order on every rebill, so a renewal
+      // looks like a new order here. If the family's subscription was already
+      // Active, this is a renewal — we must NOT re-fire the welcome (K1) or the
+      // annual-upgrade timer (K8). We only (re)fire for a genuine reactivation:
+      // an existing parent whose subscription was NOT already active.
+      const isRenewal = existing.subscription_status === "Active";
       await supabase.from("parents").update({
         shopify_customer_id: customer?.id?.toString(),
         membership_tier: tier,
@@ -270,25 +276,33 @@ router.post("/webhooks/shopify/orders", async (req: RawRequest, res) => {
       // produced the "paid for Minis, got Homeschool Minis" bug.
       await createMembershipSlots(existing.id, order.id, membershipSlots, req);
 
-      // Phase 2.1: emit `family_subscribed` so Klaviyo's K1 Welcome flow can
-      // fire with the existing onboarding URL. For a returning subscriber this
-      // doesn't issue a fresh token — they keep the one they had.
-      void emitKlaviyoEvent({
-        event: "family_subscribed",
-        profile: {
-          email: customerEmail,
-          first_name: customer?.first_name ?? undefined,
-          last_name: customer?.last_name ?? undefined,
-        },
-        properties: {
-          tier,
-          billing_type,
-          // K8 annual-upgrade flow triggers off this date property (day-90 send).
-          subscription_start_date: existing.join_date ?? new Date().toISOString().split("T")[0],
-          onboarding_url: `${appBaseUrl()}/onboarding?token=${existing.onboarding_token}`,
-          returning_subscriber: true,
-        },
-      }).catch((err) => req.log?.warn({ err }, "Klaviyo family_subscribed emit failed (existing parent)"));
+      // Only (re)fire `family_subscribed` when this is NOT a renewal — otherwise
+      // every ReCharge rebill would re-welcome the family (the bug reported after
+      // the 25 Aug fix started reading order.email). A genuine reactivation still
+      // fires so a returning family is welcomed back.
+      if (isRenewal) {
+        req.log?.info(
+          { parentId: existing.id },
+          "Shopify orders: renewal of an active subscription — not re-firing family_subscribed",
+        );
+      } else {
+        void emitKlaviyoEvent({
+          event: "family_subscribed",
+          profile: {
+            email: customerEmail,
+            first_name: customer?.first_name ?? undefined,
+            last_name: customer?.last_name ?? undefined,
+          },
+          properties: {
+            tier,
+            billing_type,
+            // K8 annual-upgrade flow triggers off this date property (day-90 send).
+            subscription_start_date: existing.join_date ?? new Date().toISOString().split("T")[0],
+            onboarding_url: `${appBaseUrl()}/onboarding?token=${existing.onboarding_token}`,
+            returning_subscriber: true,
+          },
+        }).catch((err) => req.log?.warn({ err }, "Klaviyo family_subscribed emit failed (existing parent)"));
+      }
 
       req.log?.info({ parentId: existing.id }, "Shopify orders: updated existing parent");
       res.status(200).json({ received: true, parent_id: existing.id, onboarding_token: existing.onboarding_token });
