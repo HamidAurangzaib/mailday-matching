@@ -33,6 +33,7 @@ import {
 } from "../lib/consent-timing.js";
 import { emitKlaviyoEvent } from "../lib/klaviyo-events.js";
 import { computeSubscriptionMonth } from "../lib/subscription.js";
+import { packThemeForMonth } from "../lib/pack-theme.js";
 import { appBaseUrl } from "../lib/app-url.js";
 import { AWAITING_ADDRESS } from "../lib/gak-address.js";
 import { getSubscription, changeNextChargeDate } from "../lib/recharge.js";
@@ -1333,8 +1334,9 @@ interface PackDueResult {
   scanned: number;            // active children examined
   fired: number;              // pack_due events emitted (counted in dryRun too)
   skippedNoPackYet: number;   // subscription_month < 1
+  theme: string | null;       // this run's calendar-month theme (null = not mapped yet)
   errors: string[];
-  fires: Array<{ child_first_name: string; tier: string; subscription_month: number; parent_email: string }>;
+  fires: Array<{ child_first_name: string; tier: string; subscription_month: number; parent_email: string; theme: string | null }>;
 }
 
 export async function runPackDueCron(
@@ -1342,9 +1344,18 @@ export async function runPackDueCron(
 ): Promise<PackDueResult> {
   const dryRun = opts.dryRun ?? false;
   const asOf = opts.asOf ?? new Date();
+  // Same theme for every family this run — it's keyed by calendar month, not
+  // by any one child's subscription_month. See pack-theme.ts for why.
+  const theme = packThemeForMonth(asOf);
   const result: PackDueResult = {
-    dryRun, scanned: 0, fired: 0, skippedNoPackYet: 0, errors: [], fires: [],
+    dryRun, scanned: 0, fired: 0, skippedNoPackYet: 0, theme, errors: [], fires: [],
   };
+  if (theme === null) {
+    result.errors.push(
+      `No theme mapped for ${asOf.getFullYear()}-${String(asOf.getMonth() + 1).padStart(2, "0")} ` +
+      `in pack-theme.ts — pack_due events this run were sent WITHOUT a theme property.`,
+    );
+  }
 
   // 1. Active subscribers.
   const { data: activeParents, error: pErr } = await supabase
@@ -1380,6 +1391,7 @@ export async function runPackDueCron(
       tier: child.tier as string,
       subscription_month: month,
       parent_email: parent.email as string,
+      theme,
     });
 
     if (dryRun) { result.fired++; continue; }
@@ -1397,6 +1409,7 @@ export async function runPackDueCron(
           child_first_name: child.child_first_name,
           tier: child.tier,
           subscription_month: month,
+          theme,
         },
         time: asOf,
       });
