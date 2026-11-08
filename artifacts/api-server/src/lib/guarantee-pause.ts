@@ -15,6 +15,7 @@ import { supabase } from "./supabase.js";
 import { logAudit } from "./audit.js";
 import { logger } from "./logger.js";
 import { changeNextChargeDate } from "./recharge.js";
+import { notifySlack, section } from "./slack-notify.js";
 
 export interface ResumeResult {
   resumed: boolean;
@@ -81,6 +82,18 @@ export async function resumeGuaranteePause(
     });
 
     logger.info({ parentId, restoreTo, dryRun: moved.dryRun }, "Guarantee pause resumed");
+
+    // Real money just moved back — same reasoning as the pause-side notify in
+    // lifecycle-jobs.ts: tell the team the moment it happens, fire-and-forget.
+    if (!moved.dryRun) {
+      void notifySlack([
+        section(
+          `▶️ *Billing resumed* — ${parent.email} (match created)\n` +
+          `ReCharge next charge date restored: \`${restoreTo}\``,
+        ),
+      ]).catch((err) => logger.warn({ err, parentId }, "Slack notify failed (guarantee resume)"));
+    }
+
     return { resumed: true };
   } catch (err) {
     logger.error({ err, parentId }, "Guarantee resume threw — match flow continues regardless");

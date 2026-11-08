@@ -34,6 +34,7 @@ import {
 import { emitKlaviyoEvent } from "../lib/klaviyo-events.js";
 import { computeSubscriptionMonth } from "../lib/subscription.js";
 import { packThemeForMonth } from "../lib/pack-theme.js";
+import { notifySlack, section } from "../lib/slack-notify.js";
 import { appBaseUrl } from "../lib/app-url.js";
 import { AWAITING_ADDRESS } from "../lib/gak-address.js";
 import { getSubscription, changeNextChargeDate } from "../lib/recharge.js";
@@ -376,6 +377,16 @@ export async function runGuaranteeBreachJob(): Promise<GuaranteeBreachResult> {
             payloadAfter: { next_charge_date: pushedTo },
             metadata: { subscriptionId, source: "guarantee_breach_cron" },
           });
+          // Real money just moved — tell the team the moment it happens rather
+          // than let them find out from a customer (Courtney, 2026-11-08).
+          // Fire-and-forget: a Slack hiccup must never affect the pause itself,
+          // which has already been written above.
+          void notifySlack([
+            section(
+              `⏸️ *Billing paused* — ${parent.first_name ?? parent.email} (${child.child_first_name}'s 21-day guarantee)\n` +
+              `ReCharge next charge date moved: \`${originalDate ?? "unknown"}\` → \`${pushedTo}\``,
+            ),
+          ]).catch((err) => logger.warn({ err, parentId: parent.id }, "Slack notify failed (guarantee pause)"));
         } else if (moved.ok) {
           autoPause = "dry_run";
         } else {
@@ -1427,6 +1438,66 @@ export async function runPackDueCron(
   return result;
 }
 
+/**
+ * Fire ONE real `pack_due` event for a single family, on demand — e.g. to a
+ * test profile, so Klaviyo learns the `theme` property exists before the
+ * actual monthly cron next runs. Klaviyo only picks up a property once it's
+ * seen on a live event, so there's no way to "preview" it without sending one.
+ *
+ * Deliberately a separate path from `runPackDueCron`: it ignores `month < 1`
+ * (a brand-new test child would otherwise never qualify) and tags the event
+ * `test: true` so it's unmistakable in Klaviyo's event log — never fires for
+ * every child on a real family's account, only the first one, since the goal
+ * is "does Klaviyo see the shape," not a real send.
+ */
+export async function sendPackDueTestEvent(
+  email: string,
+  opts: { asOf?: Date } = {},
+): Promise<{ ok: boolean; error?: string; sent?: Record<string, unknown> }> {
+  const asOf = opts.asOf ?? new Date();
+  const theme = packThemeForMonth(asOf);
+
+  const { data: parent } = await supabase
+    .from("parents")
+    .select("id, email, first_name, last_name")
+    .eq("email", email.toLowerCase().trim())
+    .single();
+  if (!parent) return { ok: false, error: `No parent found for ${email}` };
+
+  const { data: child } = await supabase
+    .from("children")
+    .select("id, child_first_name, tier, created_date")
+    .eq("parent_id", parent.id)
+    .limit(1)
+    .single();
+  if (!child) return { ok: false, error: `${email} has no child to attach the test event to` };
+
+  const month = child.created_date ? computeSubscriptionMonth(child.created_date as string, asOf) : 1;
+  const properties = {
+    child_id: child.id,
+    child_first_name: child.child_first_name,
+    tier: child.tier,
+    subscription_month: month,
+    theme,
+    test: true,
+  };
+
+  const emit = await emitKlaviyoEvent({
+    event: "pack_due",
+    profile: {
+      email: parent.email as string,
+      first_name: (parent.first_name as string | null) ?? undefined,
+      last_name: (parent.last_name as string | null) ?? undefined,
+    },
+    properties,
+    time: asOf,
+  });
+
+  if (!emit.ok) return { ok: false, error: emit.error ?? String(emit.status) };
+  logger.info({ email, properties }, "pack_due test event sent");
+  return { ok: true, sent: properties };
+}
+
 // ─── Group A / A6: Give-a-Key families still waiting on a PO Box ─────────────
 
 export interface GakAddressOverdueResult {
@@ -1717,6 +1788,25 @@ router.post(
     req.log?.info({ by: req.user?.email, dryRun }, "Manual pack_due run triggered");
     const result = await runPackDueCron({ dryRun });
     res.json(result);
+  },
+);
+
+// Fires ONE real pack_due event (with the current theme) to a single email —
+// e.g. a test profile — so Klaviyo learns the `theme` property exists ahead
+// of the real monthly run. Body: { "email": "someone@example.com" }.
+router.post(
+  "/admin/lifecycle/pack-due/test-send",
+  requireAuth,
+  requireAdmin,
+  async (req: AuthRequest, res) => {
+    const email = typeof req.body?.email === "string" ? req.body.email : null;
+    if (!email) {
+      res.status(400).json({ error: "Body must include { email: string }" });
+      return;
+    }
+    req.log?.info({ by: req.user?.email, target: email }, "pack_due test-send triggered");
+    const result = await sendPackDueTestEvent(email);
+    res.status(result.ok ? 200 : 422).json(result);
   },
 );
 

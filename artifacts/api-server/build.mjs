@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
 import { rm } from "node:fs/promises";
@@ -9,6 +10,22 @@ import { rm } from "node:fs/promises";
 globalThis.require = createRequire(import.meta.url);
 
 const artifactDir = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(artifactDir, "..", "..");
+
+// Baked in at BUILD time, not read at runtime: `GET /api/version` (routes/health.ts)
+// used to shell out to `git rev-parse HEAD` when the server started, which came
+// back null in production — the running process's cwd there isn't inside the
+// git working tree, so there was no .git to find. Resolving it here instead,
+// where we're guaranteed to be inside the actual checkout being built, and
+// freezing it into the bundle, means the deployed server can never report a
+// commit other than the one it was actually built from.
+const buildCommit = (() => {
+  try {
+    return execSync("git rev-parse HEAD", { cwd: repoRoot, encoding: "utf8" }).trim();
+  } catch {
+    return null; // e.g. building outside a git checkout — not fatal
+  }
+})();
 
 async function buildAll() {
   const distDir = path.resolve(artifactDir, "dist");
@@ -102,6 +119,9 @@ async function buildAll() {
       "electron",
     ],
     sourcemap: "linked",
+    define: {
+      "process.env.BUILD_COMMIT": JSON.stringify(buildCommit ?? ""),
+    },
     plugins: [
       // pino relies on workers to handle logging, instead of externalizing it we use a plugin to handle it
       esbuildPluginPino({ transports: ["pino-pretty"] })

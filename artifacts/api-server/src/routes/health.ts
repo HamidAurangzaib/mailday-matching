@@ -18,13 +18,19 @@ router.get("/healthz", (_req, res) => {
  * was actually running. Hit this URL right after every deploy; the commit it
  * reports must match `git log -1` on main, or the deploy didn't take.
  *
- * Reads `git rev-parse HEAD` from the checked-out working tree at startup
- * (Replit's deploy is a literal `git fetch` + `git reset --hard`, so .git is
- * always present) and caches it — a deploy always restarts the process, so a
- * stale cache can't outlive the deploy it would be hiding.
+ * `BUILD_COMMIT` is inlined into the bundle at BUILD time by build.mjs (an
+ * esbuild `define`), not read at runtime — a first version of this shelled
+ * out to `git rev-parse HEAD` when the server started and got null in
+ * production, because the deployed process's working directory isn't inside
+ * the git checkout. Baking it in at build time means it can't depend on the
+ * runtime environment at all. Falls back to a runtime `git rev-parse HEAD`
+ * only for `pnpm dev`, which runs the TypeScript directly rather than through
+ * build.mjs, so BUILD_COMMIT is never set there.
  */
 const startedAt = new Date().toISOString();
-const commit = (() => {
+const commit = ((): string | null => {
+  const baked = process.env["BUILD_COMMIT"];
+  if (baked) return baked;
   try {
     return execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
   } catch {

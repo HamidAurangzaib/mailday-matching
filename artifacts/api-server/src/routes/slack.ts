@@ -4,39 +4,9 @@ import { supabase } from "../lib/supabase.js";
 import { logger } from "../lib/logger.js";
 import { differenceInDays, parseISO, subDays, nextFriday, isToday } from "date-fns";
 import { requireAuth, requireAdmin } from "../middlewares/auth.js";
+import { header, section, divider, notifySlack as sendSlack } from "../lib/slack-notify.js";
 
 const router: IRouter = Router();
-
-// ─── Slack Block Kit helpers ──────────────────────────────────────────────────
-
-function header(text: string) {
-  return { type: "header", text: { type: "plain_text", text, emoji: true } };
-}
-
-function section(text: string) {
-  return { type: "section", text: { type: "mrkdwn", text } };
-}
-
-function divider() {
-  return { type: "divider" };
-}
-
-async function sendSlack(blocks: unknown[]): Promise<void> {
-  const url = process.env["SLACK_WEBHOOK"];
-  if (!url) {
-    logger.warn("SLACK_WEBHOOK_URL not set — skipping Slack notification");
-    return;
-  }
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ blocks }),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Slack webhook failed: ${res.status} ${text}`);
-  }
-}
 
 // ─── Data fetcher ─────────────────────────────────────────────────────────────
 
